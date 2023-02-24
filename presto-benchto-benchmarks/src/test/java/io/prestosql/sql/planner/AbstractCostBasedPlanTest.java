@@ -31,6 +31,7 @@ import io.prestosql.spi.plan.AggregationNode;
 import io.prestosql.spi.plan.CTEScanNode;
 import io.prestosql.spi.plan.FilterNode;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.TableScanNode;
 import io.prestosql.spi.plan.ValuesNode;
 import io.prestosql.sql.planner.assertions.BasePlanTest;
@@ -279,6 +280,15 @@ public abstract class AbstractCostBasedPlanTest
                 output(indent, "join (%s, %s):", node.getType(), distributionType);
             }
 
+            return visitPlan(node, indent + 1);
+        }
+
+        @Override
+        public Void visitJoinOnAggregation(JoinOnAggregationNode node, Integer indent)
+        {
+            JoinNode.DistributionType distributionType = node.getDistributionType()
+                    .orElseThrow(() -> new VerifyException("Expected distribution type to be set"));
+            output(indent, "join (%s, %s):", node.getType(), distributionType);
             return visitPlan(node, indent + 1);
         }
 

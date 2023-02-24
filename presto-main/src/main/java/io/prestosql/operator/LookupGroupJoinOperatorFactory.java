@@ -54,7 +54,6 @@ public class LookupGroupJoinOperatorFactory
     private final HashGenerator probeHashGenerator;
     private final boolean forked;
     private final PartitioningSpillerFactory partitioningSpillerFactory;
-    private final List<Symbol> probeFinalOutputSymbols;
     private final List<Integer> probeFinalOutputChannels;
     private final List<Integer> buildFinalOutputChannels;
     private boolean closed;
@@ -82,7 +81,6 @@ public class LookupGroupJoinOperatorFactory
             boolean forked,
             GroupJoinAggregator aggrfactory,
             GroupJoinAggregator aggrOnAggrfactory,
-            List<Symbol> probeFinalOutputSymbols,
             List<Integer> probeFinalOutputChannels,
             List<Integer> buildFinalOutputChannels)
     {
@@ -116,8 +114,6 @@ public class LookupGroupJoinOperatorFactory
 
         this.aggrfactory = aggrfactory;
         this.aggrOnAggrfactory = aggrOnAggrfactory;
-
-        this.probeFinalOutputSymbols = probeFinalOutputSymbols;
         this.probeFinalOutputChannels = probeFinalOutputChannels;
         this.buildFinalOutputChannels = buildFinalOutputChannels;
     }
@@ -145,7 +141,6 @@ public class LookupGroupJoinOperatorFactory
         this.aggrOnAggrfactory = other.aggrOnAggrfactory;
 
         this.probeFinalOutputChannels = other.probeFinalOutputChannels;
-        this.probeFinalOutputSymbols = other.probeFinalOutputSymbols;
         this.buildFinalOutputChannels = other.buildFinalOutputChannels;
 
         this.closed = false;
@@ -184,7 +179,6 @@ public class LookupGroupJoinOperatorFactory
                 isSpillToHdfsEnabled(driverContext.getPipelineContext().getTaskContext().getSession()),
                 aggrfactory,
                 aggrOnAggrfactory,
-                probeFinalOutputSymbols,
                 probeFinalOutputChannels,
                 buildFinalOutputChannels);
     }
@@ -375,7 +369,6 @@ public class LookupGroupJoinOperatorFactory
                     forked,
                     aggrfactory,
                     aggrOnAggrfactory,
-                    probeFinalOutputSymbols,
                     probeFinalOutputChannels,
                     buildFinalOutputChannels);
         }

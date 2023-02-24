@@ -3156,7 +3156,6 @@ public class LocalExecutionPlanner
                             false,
                             aggrfactory,
                             aggrOnAggrfactory,
-                            probeFinalOutputSymbols,
                             probeFinalOutputChannels,
                             buildFinalOutputChannels,
                             outputTypes.build());

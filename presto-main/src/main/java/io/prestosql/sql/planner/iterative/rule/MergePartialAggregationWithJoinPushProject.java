@@ -125,7 +125,7 @@ public class MergePartialAggregationWithJoinPushProject
                 joinNode.getDistributionType(),
                 joinNode.isSpillable(),
                 joinNode.getDynamicFilters());
-        node = new AggregationNode(node.getId(),
+        AggregationNode nodeNew = new AggregationNode(node.getId(),
                 joinNode,
                 node.getAggregations(),
                 node.getGroupingSets(),
@@ -135,7 +135,7 @@ public class MergePartialAggregationWithJoinPushProject
                 node.getGroupIdSymbol(),
                 node.getAggregationType(),
                 node.getFinalizeSymbol());
-        return checkAndApplyRule(node, context, joinNode);
+        return checkAndApplyRule(nodeNew, context, joinNode);
     }
 
     private static boolean nonTrivialProjection(ProjectNode project)

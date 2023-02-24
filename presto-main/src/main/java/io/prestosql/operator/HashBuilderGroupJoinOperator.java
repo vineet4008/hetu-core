@@ -94,7 +94,7 @@ public class HashBuilderGroupJoinOperator
     protected AggregationBuilder aggrOnAggregationBuilder;
     protected LocalMemoryContext aggrMemoryContext;
     protected LocalMemoryContext aggrOnAggrMemoryContext;
-    protected WorkProcessor<Page> outputPages;
+    protected WorkProcessor<Page> aggrOutputPages;
 
     // for yield when memory is not available
     protected Work<?> unfinishedAggrWork;
@@ -102,6 +102,7 @@ public class HashBuilderGroupJoinOperator
     protected long numberOfUniqueRowsProduced;
     private final GroupJoinAggregator aggregator;
     private final GroupJoinAggregator aggrOnAggregator;
+    private boolean aggregationInputProcessed;
 
     public HashBuilderGroupJoinOperator(
             OperatorContext operatorContext,
@@ -169,7 +170,7 @@ public class HashBuilderGroupJoinOperator
     public boolean needsInput()
     {
         if (state == State.CONSUMING_INPUT) {
-            if (outputPages != null) {
+            if (aggrOutputPages != null) {
                 return false;
             }
             else if (aggregationBuilder != null && aggregationBuilder.isFull()) {
@@ -207,6 +208,7 @@ public class HashBuilderGroupJoinOperator
         else {
             checkState(!aggregationBuilder.isFull(), "Aggregation buffer is full");
         }
+        aggregationInputProcessed = true;
 
         // process the current page; save the unfinished work if we are waiting for memory
         unfinishedAggrWork = aggregationBuilder.processPage(page);
@@ -304,8 +306,8 @@ public class HashBuilderGroupJoinOperator
             unfinishedAggrWork = null;
         }
 
-        if (outputPages == null) {
-            if (aggregator.isProduceDefaultOutput()) {
+        if (aggrOutputPages == null) {
+            if (!aggregationInputProcessed && aggregator.isProduceDefaultOutput()) {
                 // global aggregations always generate an output row with the default aggregation output (e.g. 0 for COUNT, NULL for SUM)
                 state = State.AGGR_FINISHED;
                 return aggregator.getGlobalAggregationOutput();
@@ -316,26 +318,26 @@ public class HashBuilderGroupJoinOperator
                 return null;
             }
 
-            outputPages = aggregationBuilder.buildResult();
+            aggrOutputPages = aggregationBuilder.buildResult();
         }
 
-        if (!outputPages.process()) {
+        if (!aggrOutputPages.process()) {
             return null;
         }
 
-        if (outputPages.isFinished()) {
+        if (aggrOutputPages.isFinished()) {
             closeAggregationBuilder();
             return null;
         }
 
-        Page result = outputPages.getResult();
+        Page result = aggrOutputPages.getResult();
         numberOfUniqueRowsProduced += result.getPositionCount();
         return result;
     }
 
     protected void closeAggregationBuilder()
     {
-        outputPages = null;
+        aggrOutputPages = null;
         if (aggregationBuilder != null) {
             aggregationBuilder.recordHashCollisions(hashCollisionsCounter);
             aggregationBuilder.close();

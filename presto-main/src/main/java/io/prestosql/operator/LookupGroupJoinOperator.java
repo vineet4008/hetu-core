@@ -28,7 +28,6 @@ import io.prestosql.operator.aggregation.builder.InMemoryHashAggregationBuilderW
 import io.prestosql.operator.exchange.LocalPartitionGenerator;
 import io.prestosql.snapshot.SingleInputSnapshotState;
 import io.prestosql.spi.Page;
-import io.prestosql.spi.plan.Symbol;
 import io.prestosql.spi.type.Type;
 import io.prestosql.spiller.PartitioningSpiller;
 import io.prestosql.spiller.PartitioningSpillerFactory;
@@ -150,13 +149,13 @@ public class LookupGroupJoinOperator
 
     private final HashCollisionsCounter hashCollisionsCounter;
 
-    protected boolean aggregationFinishing;
+    /*protected boolean aggregationFinishing;*/
     protected long numberOfInputRowsProcessed;
     protected long numberOfUniqueRowsProduced;
     protected Work<?> unfinishedAggrWork;
     protected boolean aggregationInputProcessed;
     private final boolean spillEnabled = false;
-    private boolean aggregationFinished;
+    /*private boolean aggregationFinished;*/
     protected WorkProcessor<Page> aggrOutputPages;
     protected State state = State.CONSUMING_INPUT;
 
@@ -177,7 +176,6 @@ public class LookupGroupJoinOperator
             boolean isSingleSessionSpiller,
             GroupJoinAggregator aggregator,
             GroupJoinAggregator aggrOnAggregator,
-            List<Symbol> probeFinalOutputSymbols,
             List<Integer> probeFinalOutputChannels,
             List<Integer> buildFinalOutputChannels)
     {
@@ -234,15 +232,16 @@ public class LookupGroupJoinOperator
         if (finishing) {
             return;
         }
+        if (State.CONSUMING_INPUT == state) {
+            state = State.AGGR_FINISHING;
+        }
         finishing = true;
-        aggregationFinishing = true;
     }
 
     @Override
     public boolean isFinished()
     {
         boolean finishedNow = this.finishing && this.finished && probe == null && pageBuilder.isEmpty() && outputPage == null;
-        // TODO Vineet Check the aggregation related pending work
         // if finishedNow drop references so memory is freed early
         if (finishedNow) {
             close();
@@ -263,9 +262,8 @@ public class LookupGroupJoinOperator
     @Override
     public boolean needsInput()
     {
-        // TODO Vineet check aggregation related conditions
-        if (!finishing && state == State.CONSUMING_INPUT) {
-            if (aggregationFinishing || aggrOutputPages != null) {
+        if (state == State.CONSUMING_INPUT) {
+            if (aggrOutputPages != null) {
                 return false;
             }
             else if (aggregationBuilder != null && aggregationBuilder.isFull()) {
@@ -284,35 +282,18 @@ public class LookupGroupJoinOperator
                 return true;
             }
         }
-        else {
-            return allowMarker2()
-                    && lookupSourceProviderFuture.isDone();
-        }
-    }
-
-    public boolean allowMarker2()
-    {
-        return !finishing
-                && probe == null
-                && outputPage == null;
+        return false;
     }
 
     @Override
     public void addInput(Page page)
     {
-        addInput(page, false);
-    }
-
-    private void addInput(Page page, boolean isRestoredPage)
-    {
         requireNonNull(page, "page is null");
         checkState(probe == null, "Current page has not been completely processed yet");
-
         checkState(tryFetchLookupSourceProvider(), "Not ready to handle input yet");
         // create Aggregators and pass page to them for process
-        checkState(!aggregationFinishing, "Operator is already finishing");
+        checkState(state == State.CONSUMING_INPUT, "Operator is already finishing");
         aggregationInputProcessed = true;
-
         if (aggregationBuilder == null) {
             createAggregationBuilder();
         }
@@ -324,7 +305,6 @@ public class LookupGroupJoinOperator
         unfinishedAggrWork = aggregationBuilder.processPage(page);
         if (unfinishedAggrWork.process()) {
             unfinishedAggrWork = null;
-            // TODO Vineet check if can index this pages here.
         }
         aggregationBuilder.updateMemory();
         numberOfInputRowsProcessed += page.getPositionCount();
@@ -359,7 +339,6 @@ public class LookupGroupJoinOperator
     {
         Page page = processAggregation();
         if (page != null) {
-            // TODO Vineet may need to cache these pages and also check the condition for state change.
             createProbe(page);
         }
     }
@@ -369,6 +348,9 @@ public class LookupGroupJoinOperator
     {
         switch (state) {
             case CONSUMING_INPUT:
+                return null;
+            case AGGR_FINISHING:
+            case AGGR_FINISHED:
                 if (probe == null) {
                     finishAggregation();
                 }
@@ -483,7 +465,8 @@ public class LookupGroupJoinOperator
 
     public Page processAggregation()
     {
-        if (aggregationFinished) {
+        if (state == State.AGGR_FINISHED) {
+            state = State.SOURCE_BUILT;
             return null;
         }
 
@@ -498,25 +481,21 @@ public class LookupGroupJoinOperator
         }
 
         if (aggrOutputPages == null) {
-            if (aggregationFinishing) {
-                if (!aggregationInputProcessed && aggregator.isProduceDefaultOutput()) {
-                    // global aggregations always generate an output row with the default aggregation output (e.g. 0 for COUNT, NULL for SUM)
-                    aggregationFinished = true;
-                    /*state = State.SOURCE_BUILT;*/
-                    return aggregator.getGlobalAggregationOutput();
-                }
+            if (!aggregationInputProcessed && aggregator.isProduceDefaultOutput()) {
+                // global aggregations always generate an output row with the default aggregation output (e.g. 0 for COUNT, NULL for SUM)
+                state = State.AGGR_FINISHED;
+                return aggregator.getGlobalAggregationOutput();
+            }
 
-                if (aggregationBuilder == null) {
-                    aggregationFinished = true;
-                    /*state = State.SOURCE_BUILT;*/
-                    return null;
-                }
+            if (aggregationBuilder == null) {
+                state = State.AGGR_FINISHED;
+                return null;
             }
 
             // only flush if we are finishing or the aggregation builder is full
-            if (!aggregationFinishing && (aggregationBuilder == null || !aggregationBuilder.isFull())) {
+            /*if (!aggregationBuilder.isFull()) {
                 return null;
-            }
+            }*/
 
             aggrOutputPages = aggregationBuilder.buildResult();
         }
@@ -562,26 +541,6 @@ public class LookupGroupJoinOperator
             probeAggregationBuilder = null;
         }
         aggrOnAggrMemoryContext.setBytes(0);
-        /*aggrOnAggregator.getPartialAggregationController().ifPresent(
-                controller -> controller.onFlush(numberOfInputRowsProcessed, numberOfUniqueRowsProduced));
-        numberOfInputRowsProcessed = 0;
-        numberOfUniqueRowsProduced = 0;*/
-    }
-
-    protected void closeBuildAggrOnAggregationBuilder()
-    {
-        if (buildAggregationBuilder != null) {
-            buildAggregationBuilder.recordHashCollisions(hashCollisionsCounter);
-            buildAggregationBuilder.close();
-            // aggregationBuilder.close() will release all memory reserved in memory accounting.
-            // The reference must be set to null afterwards to avoid unaccounted memory.
-            buildAggregationBuilder = null;
-        }
-        //memoryContext.setBytes(0);
-        /*aggrOnAggregator.getPartialAggregationController().ifPresent(
-                controller -> controller.onFlush(numberOfInputRowsProcessed, numberOfUniqueRowsProduced));
-        numberOfInputRowsProcessed = 0;
-        numberOfUniqueRowsProduced = 0;*/
     }
 
     private void processProbe()
@@ -696,7 +655,6 @@ public class LookupGroupJoinOperator
         catch (IOException e) {
             throw new RuntimeException(e);
         }
-        //closeBuildAggrOnAggregationBuilder();
     }
 
     /**
