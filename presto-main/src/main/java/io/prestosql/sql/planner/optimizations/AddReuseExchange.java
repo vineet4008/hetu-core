@@ -24,6 +24,7 @@ import io.prestosql.spi.plan.Assignments;
 import io.prestosql.spi.plan.CTEScanNode;
 import io.prestosql.spi.plan.FilterNode;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.PlanNode;
 import io.prestosql.spi.plan.PlanNodeIdAllocator;
 import io.prestosql.spi.plan.ProjectNode;
@@ -188,6 +189,25 @@ public class AddReuseExchange
         {
             JoinNode node = inputNode;
             node = (JoinNode) visitPlan(node, context);
+            // verify right side
+            TableScanNode left = (TableScanNode) getTableScanNode(node.getLeft());
+            TableScanNode right = (TableScanNode) getTableScanNode(node.getRight());
+            if (left != null && right != null && WrapperScanNode.of(left).equals(WrapperScanNode.of(right))) {
+                WrapperScanNode leftNode = WrapperScanNode.of(left);
+                if (planNodeListHashMap.get(leftNode) != null) {
+                    // These nodes are part of reuse exchange, adjust them.
+                    planNodeListHashMap.remove(leftNode);
+                }
+            }
+
+            return node;
+        }
+
+        @Override
+        public PlanNode visitJoinOnAggregation(JoinOnAggregationNode inputNode, RewriteContext<Void> context)
+        {
+            JoinOnAggregationNode node = inputNode;
+            node = (JoinOnAggregationNode) visitPlan(node, context);
             // verify right side
             TableScanNode left = (TableScanNode) getTableScanNode(node.getLeft());
             TableScanNode right = (TableScanNode) getTableScanNode(node.getRight());

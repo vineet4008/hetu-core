@@ -262,6 +262,24 @@ public class JoinOnAggregationNode
         return visitor.visitJoinOnAggregation(this, context);
     }
 
+    public JoinOnAggregationNode withSpillable(boolean spillable)
+    {
+        return new JoinOnAggregationNode(getId(),
+                type,
+                criteria,
+                filter,
+                leftHashSymbol,
+                rightHashSymbol,
+                distributionType,
+                Optional.of(spillable),
+                dynamicFilters,
+                leftAggr,
+                rightAggr,
+                aggrOnAggrLeft,
+                aggrOnAggrRight,
+                outputSymbols);
+    }
+
     public static class JoinInternalAggregation
             extends PlanNode
     {

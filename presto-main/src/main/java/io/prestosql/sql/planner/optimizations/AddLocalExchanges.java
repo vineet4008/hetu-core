@@ -26,6 +26,7 @@ import io.prestosql.spi.connector.SortingProperty;
 import io.prestosql.spi.plan.AggregationNode;
 import io.prestosql.spi.plan.CTEScanNode;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.LimitNode;
 import io.prestosql.spi.plan.MarkDistinctNode;
 import io.prestosql.spi.plan.PlanNode;
@@ -675,6 +676,41 @@ public class AddLocalExchanges
         public PlanWithProperties visitJoin(JoinNode inputNode, StreamPreferredProperties parentPreferences)
         {
             JoinNode node = inputNode;
+            PlanWithProperties probe = planAndEnforce(
+                    node.getLeft(),
+                    defaultParallelism(session),
+                    parentPreferences.constrainTo(node.getLeft().getOutputSymbols()).withDefaultParallelism(session));
+
+            if (isSpillEnabled(session)) {
+                if (probe.getProperties().getDistribution() != FIXED) {
+                    // Disable spill for joins over non-fixed streams as otherwise we would need to insert local exchange.
+                    // Such local exchanges can hurt performance when spill is not triggered.
+                    // When spill is not triggered it should not induce performance penalty.
+                    node = node.withSpillable(false);
+                }
+                else {
+                    node = node.withSpillable(true);
+                }
+            }
+
+            // this build consumes the input completely, so we do not pass through parent preferences
+            List<Symbol> buildHashSymbols = Lists.transform(node.getCriteria(), JoinNode.EquiJoinClause::getRight);
+            StreamPreferredProperties buildPreference;
+            if (getTaskConcurrency(session) > 1) {
+                buildPreference = exactlyPartitionedOn(buildHashSymbols);
+            }
+            else {
+                buildPreference = singleStream();
+            }
+            PlanWithProperties build = planAndEnforce(node.getRight(), buildPreference, buildPreference);
+
+            return rebaseAndDeriveProperties(node, ImmutableList.of(probe, build));
+        }
+
+        @Override
+        public PlanWithProperties visitJoinOnAggregation(JoinOnAggregationNode inputNode, StreamPreferredProperties parentPreferences)
+        {
+            JoinOnAggregationNode node = inputNode;
             PlanWithProperties probe = planAndEnforce(
                     node.getLeft(),
                     defaultParallelism(session),

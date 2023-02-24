@@ -28,6 +28,7 @@ import io.prestosql.spi.plan.CTEScanNode;
 import io.prestosql.spi.plan.FilterNode;
 import io.prestosql.spi.plan.GroupIdNode;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.LimitNode;
 import io.prestosql.spi.plan.MarkDistinctNode;
 import io.prestosql.spi.plan.PlanNode;
@@ -224,6 +225,27 @@ public final class StreamPropertyDerivations
                 default:
                     throw new UnsupportedOperationException("Unsupported join type: " + node.getType());
             }
+        }
+
+        @Override
+        public StreamProperties visitJoinOnAggregation(JoinOnAggregationNode node, List<StreamProperties> inputProperties)
+        {
+            StreamProperties leftProperties = inputProperties.get(0);
+            boolean unordered = spillPossible(session, node);
+
+            switch (node.getType()) {
+                case INNER:
+                    return leftProperties
+                            .translate(column -> PropertyDerivations.filterOrRewrite(node.getOutputSymbols(), node.getCriteria(), column))
+                            .unordered(unordered);
+                default:
+                    throw new UnsupportedOperationException("Unsupported group join type: " + node.getType());
+            }
+        }
+
+        private static boolean spillPossible(Session session, JoinOnAggregationNode node)
+        {
+            return isSpillEnabled(session) && node.isSpillable().orElseThrow(() -> new IllegalArgumentException("spillable not yet set"));
         }
 
         private static boolean spillPossible(Session session, JoinNode node)

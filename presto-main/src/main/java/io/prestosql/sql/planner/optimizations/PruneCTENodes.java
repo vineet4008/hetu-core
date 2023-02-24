@@ -22,6 +22,7 @@ import io.prestosql.spi.plan.AggregationNode;
 import io.prestosql.spi.plan.CTEScanNode;
 import io.prestosql.spi.plan.FilterNode;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.PlanNode;
 import io.prestosql.spi.plan.PlanNodeId;
 import io.prestosql.spi.plan.PlanNodeIdAllocator;
@@ -146,6 +147,35 @@ public class PruneCTENodes
                 return false;
             }
             return true;
+        }
+
+        private boolean checkCTELevel(JoinOnAggregationNode node)
+        {
+            int leftLevel = getChildCTELevel(node.getLeft(), 0);
+            int rightLevel = getChildCTELevel(node.getRight(), 0);
+            if (leftLevel == 0 || rightLevel == 0) {
+                return true;
+            }
+            else if (leftLevel == rightLevel) {
+                return false;
+            }
+            return true;
+        }
+
+        @Override
+        public PlanNode visitJoinOnAggregation(JoinOnAggregationNode node, RewriteContext<Expression> context)
+        {
+            Integer left = getChildCTERefNum(node.getLeft());
+            Integer right = getChildCTERefNum(node.getRight());
+            if (left != null && right != null && left.equals(right) && checkCTELevel(node)) {
+                if (!isNodeAlreadyVisited) {
+                    PlanNodeId probeCteNodeId = getProbeCTENodeId(node.getLeft());
+                    if (probeCteNodeId != null) {
+                        probeCTEToPrune.add(probeCteNodeId);
+                    }
+                }
+            }
+            return context.defaultRewrite(node, context.get());
         }
 
         private PlanNodeId getProbeCTENodeId(PlanNode node)
