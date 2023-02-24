@@ -89,15 +89,10 @@ public class LookupGroupJoinOperator
 
     private final OperatorContext operatorContext;
 
-    private final List<Type> probeTypes;
-    private final List<Symbol> probeFinalOutputSymbols;
-    private final List<Integer> probeFinalOutputChannels;
-    private final List<Integer> buildFinalOutputChannels;
     private final GroupJoinProbeFactory joinProbeFactory;
     private final Runnable afterClose;
 
     private final PartitioningSpillerFactory partitioningSpillerFactory;
-
     private Runnable afterMemOpFinish;
     private final OptionalInt lookupJoinsCount;
     private final HashGenerator hashGenerator;
@@ -123,7 +118,6 @@ public class LookupGroupJoinOperator
     private boolean closed;
     private boolean finishing;
     private boolean unspilling;
-    private boolean isSpillerRestored;
     private boolean finished;
     private long joinPosition = -1;
     private int joinSourcePositions;
@@ -151,18 +145,19 @@ public class LookupGroupJoinOperator
     protected AggregationBuilder aggregationBuilder;
     protected AggregationBuilder probeAggregationBuilder;
     protected AggregationBuilder buildAggregationBuilder;
-    protected LocalMemoryContext memoryContext;
+    protected LocalMemoryContext aggrMemoryContext;
+    protected LocalMemoryContext aggrOnAggrMemoryContext;
 
     private final HashCollisionsCounter hashCollisionsCounter;
 
     protected boolean aggregationFinishing;
     protected long numberOfInputRowsProcessed;
     protected long numberOfUniqueRowsProduced;
-    protected Work<?> unfinishedWork;
+    protected Work<?> unfinishedAggrWork;
     protected boolean aggregationInputProcessed;
     private final boolean spillEnabled = false;
     private boolean aggregationFinished;
-    protected WorkProcessor<Page> outputPages;
+    protected WorkProcessor<Page> aggrOutputPages;
     protected State state = State.CONSUMING_INPUT;
 
     public LookupGroupJoinOperator(
@@ -187,7 +182,7 @@ public class LookupGroupJoinOperator
             List<Integer> buildFinalOutputChannels)
     {
         this.operatorContext = requireNonNull(operatorContext, "operatorContext is null");
-        this.probeTypes = ImmutableList.copyOf(requireNonNull(probeTypes, "probeTypes is null"));
+        List<Type> probeTypes1 = ImmutableList.copyOf(requireNonNull(probeTypes, "probeTypes is null"));
 
         requireNonNull(joinType, "joinType is null");
         // Cannot use switch case here, because javac will synthesize an inner class and cause IllegalAccessError
@@ -214,16 +209,17 @@ public class LookupGroupJoinOperator
         this.hashCollisionsCounter = new HashCollisionsCounter(operatorContext);
         operatorContext.setInfoSupplier(hashCollisionsCounter);
 
-        this.memoryContext = operatorContext.localUserMemoryContext();
+        this.aggrMemoryContext = operatorContext.localUserMemoryContext();
+        this.aggrOnAggrMemoryContext = operatorContext.localUserMemoryContext();
         if (aggregator.isUseSystemMemory()) {
-            this.memoryContext = operatorContext.localSystemMemoryContext();
+            this.aggrMemoryContext = operatorContext.localSystemMemoryContext();
+        }
+        if (aggrOnAggregator.isUseSystemMemory()) {
+            this.aggrOnAggrMemoryContext = operatorContext.localSystemMemoryContext();
         }
 
         this.aggregator = aggregator;
         this.aggrOnAggregator = aggrOnAggregator;
-        this.probeFinalOutputSymbols = probeFinalOutputSymbols;
-        this.probeFinalOutputChannels = probeFinalOutputChannels;
-        this.buildFinalOutputChannels = buildFinalOutputChannels;
     }
 
     @Override
@@ -269,7 +265,7 @@ public class LookupGroupJoinOperator
     {
         // TODO Vineet check aggregation related conditions
         if (!finishing && state == State.CONSUMING_INPUT) {
-            if (aggregationFinishing || outputPages != null) {
+            if (aggregationFinishing || aggrOutputPages != null) {
                 return false;
             }
             else if (aggregationBuilder != null && aggregationBuilder.isFull()) {
@@ -277,13 +273,13 @@ public class LookupGroupJoinOperator
             }
             else {
                 // TODO Vineet Need to move this out of needsInput and need to make it light weight.
-                if (unfinishedWork != null) {
-                    boolean workDone = unfinishedWork.process();
+                if (unfinishedAggrWork != null) {
+                    boolean workDone = unfinishedAggrWork.process();
                     aggregationBuilder.updateMemory();
                     if (!workDone) {
                         return false;
                     }
-                    unfinishedWork = null;
+                    unfinishedAggrWork = null;
                 }
                 return true;
             }
@@ -325,9 +321,9 @@ public class LookupGroupJoinOperator
         }
 
         // process the current page; save the unfinished work if we are waiting for memory
-        unfinishedWork = aggregationBuilder.processPage(page);
-        if (unfinishedWork.process()) {
-            unfinishedWork = null;
+        unfinishedAggrWork = aggregationBuilder.processPage(page);
+        if (unfinishedAggrWork.process()) {
+            unfinishedAggrWork = null;
             // TODO Vineet check if can index this pages here.
         }
         aggregationBuilder.updateMemory();
@@ -341,7 +337,7 @@ public class LookupGroupJoinOperator
             LookupSource lookupSource = lookupSourceProvider.withLease((lookupSourceLease -> lookupSourceLease.getLookupSource()));
             buildAggregationBuilder = lookupSource.getAggregationBuilder().duplicate();
         }
-        probe = joinProbeFactory.createGroupJoinProbe(page/*newPage*/, false/*isSpilled*/, lookupSourceProvider, probeAggregationBuilder, buildAggregationBuilder);
+        probe = joinProbeFactory.createGroupJoinProbe(page, false, lookupSourceProvider, probeAggregationBuilder, buildAggregationBuilder);
 
         // initialize to invalid join position to force output code to advance the cursors
         joinPosition = -1;
@@ -399,7 +395,7 @@ public class LookupGroupJoinOperator
             lookupSourceProvider = new StaticLookupSourceProvider(new EmptyLookupSource());
         }
 
-        if (probe == null && finishing && unfinishedWork == null && !unspilling) {
+        if (probe == null && finishing && unfinishedAggrWork == null && !unspilling) {
             /*
              * We do not have input probe and we won't have any, as we're finishing.
              * Let LookupSourceFactory know LookupSources can be disposed as far as we're concerned.
@@ -454,7 +450,7 @@ public class LookupGroupJoinOperator
                     aggregator.getMaxPartialMemory(),
                     aggregator.getJoinCompiler(),
                     () -> {
-                        memoryContext.setBytes(((InMemoryHashAggregationBuilder) aggregationBuilder).getSizeInMemory());
+                        aggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) aggregationBuilder).getSizeInMemory());
                         if (aggregator.getStep().isOutputPartial() && aggregator.getMaxPartialMemory().isPresent()) {
                             // do not yield on memory for partial aggregations
                             return true;
@@ -472,7 +468,7 @@ public class LookupGroupJoinOperator
                     aggrOnAggregator.getMaxPartialMemory(),
                     aggrOnAggregator.getJoinCompiler(),
                     () -> {
-                        memoryContext.setBytes(((InMemoryHashAggregationBuilder) probeAggregationBuilder).getSizeInMemory());
+                        aggrOnAggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) probeAggregationBuilder).getSizeInMemory());
                         if (aggrOnAggregator.getStep().isOutputPartial() && aggrOnAggregator.getMaxPartialMemory().isPresent()) {
                             // do not yield on memory for partial aggregations
                             return true;
@@ -492,27 +488,27 @@ public class LookupGroupJoinOperator
         }
 
         // process unfinished work if one exists
-        if (unfinishedWork != null) {
-            boolean workDone = unfinishedWork.process();
+        if (unfinishedAggrWork != null) {
+            boolean workDone = unfinishedAggrWork.process();
             aggregationBuilder.updateMemory();
             if (!workDone) {
                 return null;
             }
-            unfinishedWork = null;
+            unfinishedAggrWork = null;
         }
 
-        if (outputPages == null) {
+        if (aggrOutputPages == null) {
             if (aggregationFinishing) {
                 if (!aggregationInputProcessed && aggregator.isProduceDefaultOutput()) {
                     // global aggregations always generate an output row with the default aggregation output (e.g. 0 for COUNT, NULL for SUM)
                     aggregationFinished = true;
-                    state = State.SOURCE_BUILT;
+                    /*state = State.SOURCE_BUILT;*/
                     return aggregator.getGlobalAggregationOutput();
                 }
 
                 if (aggregationBuilder == null) {
                     aggregationFinished = true;
-                    state = State.SOURCE_BUILT;
+                    /*state = State.SOURCE_BUILT;*/
                     return null;
                 }
             }
@@ -522,26 +518,26 @@ public class LookupGroupJoinOperator
                 return null;
             }
 
-            outputPages = aggregationBuilder.buildResult();
+            aggrOutputPages = aggregationBuilder.buildResult();
         }
 
-        if (!outputPages.process()) {
+        if (!aggrOutputPages.process()) {
             return null;
         }
 
-        if (outputPages.isFinished()) {
+        if (aggrOutputPages.isFinished()) {
             closeAggregationBuilder();
             return null;
         }
 
-        Page result = outputPages.getResult();
+        Page result = aggrOutputPages.getResult();
         numberOfUniqueRowsProduced += result.getPositionCount();
         return result;
     }
 
     protected void closeAggregationBuilder()
     {
-        outputPages = null;
+        aggrOutputPages = null;
         if (aggregationBuilder != null) {
             aggregationBuilder.recordHashCollisions(hashCollisionsCounter);
             aggregationBuilder.close();
@@ -549,7 +545,7 @@ public class LookupGroupJoinOperator
             // The reference must be set to null afterwards to avoid unaccounted memory.
             aggregationBuilder = null;
         }
-        //memoryContext.setBytes(0);
+        aggrMemoryContext.setBytes(0);
         aggregator.getPartialAggregationController().ifPresent(
                 controller -> controller.onFlush(numberOfInputRowsProcessed, numberOfUniqueRowsProduced));
         numberOfInputRowsProcessed = 0;
@@ -561,11 +557,11 @@ public class LookupGroupJoinOperator
         if (probeAggregationBuilder != null) {
             probeAggregationBuilder.recordHashCollisions(hashCollisionsCounter);
             probeAggregationBuilder.close();
-            // aggregationBuilder.close() will release all memory reserved in memory accounting.
+            // probeAggregationBuilder.close() will release all memory reserved in memory accounting.
             // The reference must be set to null afterwards to avoid unaccounted memory.
             probeAggregationBuilder = null;
         }
-        //memoryContext.setBytes(0);
+        aggrOnAggrMemoryContext.setBytes(0);
         /*aggrOnAggregator.getPartialAggregationController().ifPresent(
                 controller -> controller.onFlush(numberOfInputRowsProcessed, numberOfUniqueRowsProduced));
         numberOfInputRowsProcessed = 0;
@@ -618,9 +614,7 @@ public class LookupGroupJoinOperator
         int currentPosition = probe.getPosition();
         long currentJoinPosition = this.joinPosition;
         boolean probePositionProducedRow = this.currentProbePositionProducedRow;
-
         clearProbe();
-
         if (currentPosition < 0) {
             // Processing of the page hasn't been started yet.
             createProbe(currentPage);
@@ -634,7 +628,6 @@ public class LookupGroupJoinOperator
     private void processProbe(LookupSource lookupSource)
     {
         verify(probe != null);
-
         DriverYieldSignal yieldSignal = operatorContext.getDriverContext().getYieldSignal();
         while (!yieldSignal.isSet()) {
             if (probe.getPosition() >= 0) {
@@ -698,13 +691,12 @@ public class LookupGroupJoinOperator
                 }
             });
             spiller.ifPresent(closer::register);
+            closer.register(this::closeProbeAggrOnAggregationBuilder);
         }
         catch (IOException e) {
             throw new RuntimeException(e);
         }
-        closeProbeAggrOnAggregationBuilder();
-        closeBuildAggrOnAggregationBuilder();
-        memoryContext.setBytes(0);
+        //closeBuildAggrOnAggregationBuilder();
     }
 
     /**

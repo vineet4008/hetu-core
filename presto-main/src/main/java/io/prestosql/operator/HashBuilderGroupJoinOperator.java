@@ -29,7 +29,6 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.OptionalLong;
 
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
@@ -88,15 +87,13 @@ public class HashBuilderGroupJoinOperator
     private Optional<ListenableFuture<?>> lookupSourceNotNeeded = Optional.empty();
     @Nullable
     private LookupSourceSupplier lookupSourceSupplier;
-    private OptionalLong lookupSourceChecksum = OptionalLong.empty();
-
     private Optional<Runnable> finishMemoryRevoke = Optional.empty();
-    private final long expectedValues;
     private boolean spillToHdfsEnabled;
 
     protected AggregationBuilder aggregationBuilder;
     protected AggregationBuilder aggrOnAggregationBuilder;
-    protected LocalMemoryContext memoryContext;
+    protected LocalMemoryContext aggrMemoryContext;
+    protected LocalMemoryContext aggrOnAggrMemoryContext;
     protected WorkProcessor<Page> outputPages;
 
     // for yield when memory is not available
@@ -144,14 +141,18 @@ public class HashBuilderGroupJoinOperator
 
         this.hashCollisionsCounter = new HashCollisionsCounter(operatorContext);
         operatorContext.setInfoSupplier(hashCollisionsCounter);
-        this.spillEnabled = spillEnabled;
-        this.spillToHdfsEnabled = spillToHdfsEnabled;
-        this.expectedValues = expectedPositions * 10L;
+        // TODO Vineet Use the actual spillEnabled flag when spill is supported
+        this.spillEnabled = false;
+        this.spillToHdfsEnabled = false;
 
         requireNonNull(operatorContext, "operatorContext is null");
-        this.memoryContext = operatorContext.localUserMemoryContext();
+        this.aggrMemoryContext = operatorContext.localUserMemoryContext();
+        this.aggrOnAggrMemoryContext = operatorContext.localUserMemoryContext();
         if (aggregator.isUseSystemMemory()) {
-            this.memoryContext = operatorContext.localSystemMemoryContext();
+            this.aggrMemoryContext = operatorContext.localSystemMemoryContext();
+        }
+        if (aggrOnAggregator.isUseSystemMemory()) {
+            this.aggrOnAggrMemoryContext = operatorContext.localSystemMemoryContext();
         }
 
         this.aggregator = aggregator;
@@ -241,7 +242,7 @@ public class HashBuilderGroupJoinOperator
                     aggregator.getMaxPartialMemory(),
                     aggregator.getJoinCompiler(),
                     () -> {
-                        memoryContext.setBytes(((InMemoryHashAggregationBuilder) aggregationBuilder).getSizeInMemory());
+                        aggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) aggregationBuilder).getSizeInMemory());
                         if (aggregator.getStep().isOutputPartial() && aggregator.getMaxPartialMemory().isPresent()) {
                             // do not yield on memory for partial aggregations
                             return true;
@@ -259,7 +260,7 @@ public class HashBuilderGroupJoinOperator
                     aggrOnAggregator.getMaxPartialMemory(),
                     aggrOnAggregator.getJoinCompiler(),
                     () -> {
-                        memoryContext.setBytes(((InMemoryHashAggregationBuilder) aggrOnAggregationBuilder).getSizeInMemory());
+                        aggrOnAggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) aggrOnAggregationBuilder).getSizeInMemory());
                         if (aggrOnAggregator.getStep().isOutputPartial() && aggrOnAggregator.getMaxPartialMemory().isPresent()) {
                             // do not yield on memory for partial aggregations
                             return true;
@@ -342,11 +343,23 @@ public class HashBuilderGroupJoinOperator
             // The reference must be set to null afterwards to avoid unaccounted memory.
             aggregationBuilder = null;
         }
-        memoryContext.setBytes(0);
+        aggrMemoryContext.setBytes(0);
         aggregator.getPartialAggregationController().ifPresent(
                 controller -> controller.onFlush(numberOfInputRowsProcessed, numberOfUniqueRowsProduced));
         numberOfInputRowsProcessed = 0;
         numberOfUniqueRowsProduced = 0;
+    }
+
+    protected void closeAggrOnAggregationBuilder()
+    {
+        if (aggrOnAggregationBuilder != null) {
+            aggrOnAggregationBuilder.recordHashCollisions(hashCollisionsCounter);
+            aggrOnAggregationBuilder.close();
+            // aggrOnAggregationBuilder.close() will release all memory reserved in memory accounting.
+            // The reference must be set to null afterwards to avoid unaccounted memory.
+            aggrOnAggregationBuilder = null;
+        }
+        aggrOnAggrMemoryContext.setBytes(0);
     }
 
     @Override
@@ -480,6 +493,7 @@ public class HashBuilderGroupJoinOperator
             closer.register(index::clear);
             closer.register(() -> localUserMemoryContext.setBytes(0));
             closer.register(() -> localRevocableMemoryContext.setBytes(0));
+            closer.register(this::closeAggrOnAggregationBuilder);
         }
         catch (IOException e) {
             throw new RuntimeException(e);
