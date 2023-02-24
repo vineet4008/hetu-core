@@ -3052,8 +3052,7 @@ public class LocalExecutionPlanner
                     taskCount > 1,
                     isSpillToHdfsEnabled(context.getSession()),
                     aggrfactory,
-                    aggrOnAggrfactory
-            );
+                    aggrOnAggrfactory);
 
             factoriesBuilder.add(hashBuilderOperatorFactory);
 

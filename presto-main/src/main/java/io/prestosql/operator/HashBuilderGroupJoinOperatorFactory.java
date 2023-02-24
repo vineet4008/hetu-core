@@ -20,7 +20,6 @@ import io.prestosql.operator.aggregation.AccumulatorFactory;
 import io.prestosql.operator.aggregation.partial.PartialAggregationController;
 import io.prestosql.spi.plan.AggregationNode;
 import io.prestosql.spi.plan.PlanNodeId;
-import io.prestosql.spi.plan.Symbol;
 import io.prestosql.spi.type.Type;
 import io.prestosql.sql.gen.JoinCompiler;
 import io.prestosql.sql.gen.JoinFilterFunctionCompiler.JoinFilterFunctionFactory;
@@ -294,8 +293,7 @@ public class HashBuilderGroupJoinOperatorFactory
                     spillEnabled,
                     spillToHdfsEnabled,
                     aggrfactory,
-                    aggrOnAggrfactory
-            );
+                    aggrOnAggrfactory);
         }
     }
 }

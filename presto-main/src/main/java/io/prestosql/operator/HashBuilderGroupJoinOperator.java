@@ -21,7 +21,6 @@ import io.prestosql.operator.aggregation.builder.AggregationBuilder;
 import io.prestosql.operator.aggregation.builder.InMemoryHashAggregationBuilder;
 import io.prestosql.operator.aggregation.builder.InMemoryHashAggregationBuilderWithReset;
 import io.prestosql.spi.Page;
-import io.prestosql.spi.plan.Symbol;
 import io.prestosql.sql.gen.JoinFilterFunctionCompiler;
 
 import javax.annotation.Nullable;
