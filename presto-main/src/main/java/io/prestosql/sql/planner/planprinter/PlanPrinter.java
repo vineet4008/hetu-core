@@ -1529,11 +1529,11 @@ public class PlanPrinter
             }
             String value = "";
             if (node.getAggregationType().equals(AggregationNode.AggregationType.HASH)) {
-                value = format("hashAggregate%s%s%s", type, key, formatHash(node.getHashSymbol()));
+                value = format("HashAggregate%s%s%s", type, key, formatHash(node.getHashSymbol()));
             }
             StringBuilder builder = new StringBuilder(value);
             if (node.getAggregations().size() > 0) {
-                node.getAggregations().forEach((symbol, aggregation) -> builder.append(format("%s := %s", symbol, formatAggregation(aggregation))));
+                node.getAggregations().forEach((symbol, aggregation) -> builder.append(format("%s := %s, ", symbol, formatAggregation(aggregation))));
                 // to remove the last: ", "
                 builder.setLength(builder.length() - 2);
             }

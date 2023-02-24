@@ -114,7 +114,7 @@ public class LookupGroupJoinPageBuilder
         buildPageBuilderTmp.reset();
     }
 
-    private static Page processAggregationOnPage(long count, Page sourcePage, AggregationBuilder aggregationBuilder)
+    private Page processAggregationOnPage(long count, Page sourcePage, AggregationBuilder aggregationBuilder)
     {
         // TODO Vineet check on how to convert into future object and relate in normal code flow.
         Page finalPage;
@@ -122,12 +122,10 @@ public class LookupGroupJoinPageBuilder
             Work<?> work = aggregationBuilder.processPage(sourcePage);
             // Knowingly kept empty while loop
             while (!work.process()) {
-                i = i;
             }
         }
         WorkProcessor<Page> pageWorkProcessor = aggregationBuilder.buildResult();
         while (!pageWorkProcessor.process()) {
-            finalPage = null;
         }
         aggregationBuilder.updateMemory();
         finalPage = pageWorkProcessor.getResult();
