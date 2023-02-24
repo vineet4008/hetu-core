@@ -81,13 +81,12 @@ public class JoinOnAggregationStatsRule
         PlanNodeStatsEstimate rightStats = sourceStats.getStats(node.getRight());
         PlanNodeStatsEstimate leftAggrStats = AggregationStatsRule.groupBy(leftStats, node.getLeftAggr().getGroupingKeys(), node.getLeftAggr().getAggregations());
         PlanNodeStatsEstimate rightAggrStats = AggregationStatsRule.groupBy(rightStats, node.getRightAggr().getGroupingKeys(), node.getRightAggr().getAggregations());
-        // TODO Vineet Check if following consideration is correct??
-        PlanNodeStatsEstimate leftAggrOnAggrStats = AggregationStatsRule.groupBy(leftAggrStats, node.getAggrOnLeft().getGroupingKeys(), node.getAggrOnLeft().getAggregations());
-        PlanNodeStatsEstimate rightAggrOnAggrStats = AggregationStatsRule.groupBy(rightAggrStats, node.getAggrOnRight().getGroupingKeys(), node.getAggrOnRight().getAggregations());
-        PlanNodeStatsEstimate crossJoinStats = crossJoinStats(node, leftAggrOnAggrStats, rightAggrOnAggrStats, types);
+
+        PlanNodeStatsEstimate crossJoinStats = crossJoinStats(node, leftAggrStats, rightAggrStats, types);
 
         switch (node.getType()) {
             case INNER:
+                // TODO Vineet Check - how to consider cost of AggrOnAggr after join
                 return Optional.of(computeInnerJoinStats(node, crossJoinStats, session, types));
             default:
                 throw new IllegalStateException("Unknown group join type: " + node.getType());

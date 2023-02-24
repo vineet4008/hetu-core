@@ -34,6 +34,7 @@ import io.prestosql.spi.plan.CTEScanNode;
 import io.prestosql.spi.plan.FilterNode;
 import io.prestosql.spi.plan.GroupIdNode;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.LimitNode;
 import io.prestosql.spi.plan.MarkDistinctNode;
 import io.prestosql.spi.plan.OrderingScheme;
@@ -511,6 +512,32 @@ public class PropertyDerivations
                             .build();
                 default:
                     throw new UnsupportedOperationException("Unsupported join type: " + node.getType());
+            }
+        }
+
+        @Override
+        public ActualProperties visitJoinOnAggregation(JoinOnAggregationNode node, List<ActualProperties> inputProperties)
+        {
+            ActualProperties probeProperties = inputProperties.get(0);
+            ActualProperties buildProperties = inputProperties.get(1);
+
+            boolean unordered = spillPossible(session, node.getType());
+
+            switch (node.getType()) {
+                case INNER:
+                    probeProperties = probeProperties.translate(column -> filterOrRewrite(node.getOutputSymbols(), node.getCriteria(), column));
+                    buildProperties = buildProperties.translate(column -> filterOrRewrite(node.getOutputSymbols(), node.getCriteria(), column));
+
+                    Map<Symbol, NullableValue> constants = new HashMap<>();
+                    constants.putAll(probeProperties.getConstants());
+                    constants.putAll(buildProperties.getConstants());
+
+                    return ActualProperties.builderFrom(probeProperties)
+                            .constants(constants)
+                            .unordered(unordered)
+                            .build();
+                default:
+                    throw new UnsupportedOperationException("Unsupported group join type: " + node.getType());
             }
         }
 
