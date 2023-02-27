@@ -198,6 +198,7 @@ public class FeaturesConfig
     private DataSize cteMaterializationThresholdSize = new DataSize(128, MEGABYTE);
 
     private long joinPartitionedBuildMinRowCount = 1_000_000L;
+    private int groupJoinThreads = 4;
 
     @Config("optimizer.transform-self-join-to-window")
     public FeaturesConfig setTransformSelfJoinToWindow(boolean value)
@@ -1671,6 +1672,19 @@ public class FeaturesConfig
     public FeaturesConfig setCteMaterializationThresholdSize(DataSize cteMaterializationThresholdSize)
     {
         this.cteMaterializationThresholdSize = cteMaterializationThresholdSize;
+        return this;
+    }
+
+    @Min(1)
+    public int getGroupJoinThreads()
+    {
+        return groupJoinThreads;
+    }
+
+    @Config("experimental.group-join-threads")
+    public FeaturesConfig setGroupJoinThreads(int groupJoinThreads)
+    {
+        this.groupJoinThreads = groupJoinThreads;
         return this;
     }
 }

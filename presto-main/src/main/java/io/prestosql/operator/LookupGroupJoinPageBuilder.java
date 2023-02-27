@@ -121,11 +121,15 @@ public class LookupGroupJoinPageBuilder
         for (int i = 0; i < count; i++) {
             Work<?> work = aggregationBuilder.processPage(sourcePage);
             // Knowingly kept empty while loop
-            while (!work.process()) {
+            boolean process = work.process();
+            while (!process) {
+                process = work.process();
             }
         }
         WorkProcessor<Page> pageWorkProcessor = aggregationBuilder.buildResult();
-        while (!pageWorkProcessor.process()) {
+        boolean process = pageWorkProcessor.process();
+        while (!process) {
+            process = pageWorkProcessor.process();
         }
         aggregationBuilder.updateMemory();
         finalPage = pageWorkProcessor.getResult();

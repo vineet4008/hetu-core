@@ -14,6 +14,7 @@
 package io.prestosql.operator;
 
 import io.prestosql.operator.JoinProbe.JoinProbeFactory;
+import io.prestosql.operator.groupjoin.ExecutionHelperFactory;
 import io.prestosql.spi.plan.PlanNodeId;
 import io.prestosql.spi.type.Type;
 import io.prestosql.spiller.PartitioningSpillerFactory;
@@ -116,7 +117,8 @@ public class LookupJoinOperators
             GroupJoinAggregator aggrOnAggrfactory,
             List<Integer> probeFinalOutputChannels,
             List<Integer> buildFinalOutputChannels,
-            List<Type> outputTypes)
+            List<Type> outputTypes,
+            ExecutionHelperFactory executionHelperFactory)
     {
         return new LookupGroupJoinOperatorFactory(
                 operatorId,
@@ -135,6 +137,7 @@ public class LookupJoinOperators
                 aggrfactory,
                 aggrOnAggrfactory,
                 probeFinalOutputChannels,
-                buildFinalOutputChannels);
+                buildFinalOutputChannels,
+                executionHelperFactory);
     }
 }

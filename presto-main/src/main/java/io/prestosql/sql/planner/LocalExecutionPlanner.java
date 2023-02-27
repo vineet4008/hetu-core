@@ -126,6 +126,7 @@ import io.prestosql.operator.exchange.LocalExchangeSinkOperator.LocalExchangeSin
 import io.prestosql.operator.exchange.LocalExchangeSourceOperator.LocalExchangeSourceOperatorFactory;
 import io.prestosql.operator.exchange.LocalMergeSourceOperator.LocalMergeSourceOperatorFactory;
 import io.prestosql.operator.exchange.PageChannelSelector;
+import io.prestosql.operator.groupjoin.ExecutionHelperFactory;
 import io.prestosql.operator.index.DynamicTupleFilterFactory;
 import io.prestosql.operator.index.FieldSetFilteringRecordSet;
 import io.prestosql.operator.index.IndexBuildDriverFactoryProvider;
@@ -387,6 +388,7 @@ public class LocalExecutionPlanner
     protected final SpillerFactory spillerFactory;
     protected final SingleStreamSpillerFactory singleStreamSpillerFactory;
     protected final PartitioningSpillerFactory partitioningSpillerFactory;
+    protected final ExecutionHelperFactory executionHelperFactory;
     protected final PagesIndex.Factory pagesIndexFactory;
     protected final JoinCompiler joinCompiler;
     protected final LookupJoinOperators lookupJoinOperators;
@@ -587,7 +589,8 @@ public class LocalExecutionPlanner
             ExchangeManagerRegistry exchangeManagerRegistry,
             TableExecuteContextManager tableExecuteContextManager,
             CachedDataManager cachedDataManager,
-            HetuConfig hetuConfig)
+            HetuConfig hetuConfig,
+            ExecutionHelperFactory executionHelperFactory)
     {
         this.explainAnalyzeContext = requireNonNull(explainAnalyzeContext, "explainAnalyzeContext is null");
         this.pageSourceProvider = requireNonNull(pageSourceProvider, "pageSourceProvider is null");
@@ -625,6 +628,7 @@ public class LocalExecutionPlanner
         this.tableExecuteContextManager = requireNonNull(tableExecuteContextManager, "tableExecuteContextManager is null");
         this.cachedDataManager = requireNonNull(cachedDataManager, "cachedDataManager is null");
         this.userName = requireNonNull(hetuConfig, "hetuConfig is null").getCachingUserName();
+        this.executionHelperFactory = requireNonNull(executionHelperFactory, "executionHelperFactory is null");
     }
 
     public LocalExecutionPlan plan(
@@ -3052,7 +3056,8 @@ public class LocalExecutionPlanner
                     taskCount > 1,
                     isSpillToHdfsEnabled(context.getSession()),
                     aggrfactory,
-                    aggrOnAggrfactory);
+                    aggrOnAggrfactory,
+                    executionHelperFactory);
 
             factoriesBuilder.add(hashBuilderOperatorFactory);
 
@@ -3158,7 +3163,8 @@ public class LocalExecutionPlanner
                             aggrOnAggrfactory,
                             probeFinalOutputChannels,
                             buildFinalOutputChannels,
-                            outputTypes.build());
+                            outputTypes.build(),
+                            executionHelperFactory);
                 default:
                     throw new UnsupportedOperationException("Unsupported join type: " + node.getType());
             }

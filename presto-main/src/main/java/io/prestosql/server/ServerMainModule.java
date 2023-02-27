@@ -113,6 +113,8 @@ import io.prestosql.operator.ForExchange;
 import io.prestosql.operator.LookupJoinOperators;
 import io.prestosql.operator.OperatorStats;
 import io.prestosql.operator.PagesIndex;
+import io.prestosql.operator.groupjoin.ExecutionHelperFactory;
+import io.prestosql.operator.groupjoin.GeneralExecutionHelperFactory;
 import io.prestosql.operator.index.IndexJoinLookupStats;
 import io.prestosql.security.PasswordSecurityConfig;
 import io.prestosql.seedstore.SeedStoreManager;
@@ -580,6 +582,7 @@ public class ServerMainModule
         binder.bind(SpillerFactory.class).to(GenericSpillerFactory.class).in(Scopes.SINGLETON);
         binder.bind(SingleStreamSpillerFactory.class).to(FileSingleStreamSpillerFactory.class).in(Scopes.SINGLETON);
         binder.bind(PartitioningSpillerFactory.class).to(GenericPartitioningSpillerFactory.class).in(Scopes.SINGLETON);
+        binder.bind(ExecutionHelperFactory.class).to(GeneralExecutionHelperFactory.class).in(Scopes.SINGLETON);
         binder.bind(SpillerStats.class).in(Scopes.SINGLETON);
         newExporter(binder).export(SpillerFactory.class).withGeneratedName();
         binder.bind(LocalSpillManager.class).in(Scopes.SINGLETON);

@@ -18,6 +18,7 @@ import io.airlift.units.DataSize;
 import io.prestosql.execution.Lifespan;
 import io.prestosql.operator.aggregation.AccumulatorFactory;
 import io.prestosql.operator.aggregation.partial.PartialAggregationController;
+import io.prestosql.operator.groupjoin.ExecutionHelperFactory;
 import io.prestosql.spi.plan.AggregationNode;
 import io.prestosql.spi.plan.PlanNodeId;
 import io.prestosql.spi.type.Type;
@@ -40,6 +41,7 @@ public class HashBuilderGroupJoinOperatorFactory
 {
     private final int operatorId;
     private final PlanNodeId planNodeId;
+    private ExecutionHelperFactory executionHelperFactory;
     private final JoinBridgeManager<PartitionedLookupSourceFactory> lookupSourceFactoryManager;
     private final List<Integer> outputChannels;
     private final List<Integer> hashChannels;
@@ -78,10 +80,12 @@ public class HashBuilderGroupJoinOperatorFactory
             boolean spillEnabled,
             boolean spillToHdfsEnabled,
             GroupJoinAggregator aggrfactory,
-            GroupJoinAggregator aggrOnAggrfactory)
+            GroupJoinAggregator aggrOnAggrfactory,
+            ExecutionHelperFactory executionHelperFactory)
     {
         this.operatorId = operatorId;
         this.planNodeId = requireNonNull(planNodeId, "planNodeId is null");
+        this.executionHelperFactory = requireNonNull(executionHelperFactory, "executionHelperFactory is null");
         requireNonNull(sortChannel, "sortChannel can not be null");
         requireNonNull(searchFunctionFactories, "searchFunctionFactories is null");
         checkArgument(sortChannel.isPresent() != searchFunctionFactories.isEmpty(), "both or none sortChannel and searchFunctionFactories must be set");
@@ -133,7 +137,8 @@ public class HashBuilderGroupJoinOperatorFactory
                 spillEnabled,
                 spillToHdfsEnabled,
                 aggrfactory,
-                aggrOnAggrfactory);
+                aggrOnAggrfactory,
+                executionHelperFactory);
     }
 
     @Override
@@ -171,9 +176,16 @@ public class HashBuilderGroupJoinOperatorFactory
         private PagesIndex.Factory pagesIndexFactory;
         private boolean spillEnabled;
         private boolean spillToHdfsEnabled;
+        private ExecutionHelperFactory executionHelperFactory;
 
         public Builder()
         {
+        }
+
+        public Builder withExecutorHelperFactory(ExecutionHelperFactory executionHelperFactory)
+        {
+            this.executionHelperFactory = requireNonNull(executionHelperFactory, "executionHelperFactory is null");
+            return this;
         }
 
         public Builder withJoinInfo(int operatorId,
@@ -293,7 +305,8 @@ public class HashBuilderGroupJoinOperatorFactory
                     spillEnabled,
                     spillToHdfsEnabled,
                     aggrfactory,
-                    aggrOnAggrfactory);
+                    aggrOnAggrfactory,
+                    executionHelperFactory);
         }
     }
 }

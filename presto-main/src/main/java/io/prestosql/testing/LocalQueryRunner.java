@@ -119,6 +119,7 @@ import io.prestosql.operator.OutputFactory;
 import io.prestosql.operator.PagesIndex;
 import io.prestosql.operator.StageExecutionDescriptor;
 import io.prestosql.operator.TaskContext;
+import io.prestosql.operator.groupjoin.GeneralExecutionHelperFactory;
 import io.prestosql.operator.index.IndexJoinLookupStats;
 import io.prestosql.security.GroupProviderManager;
 import io.prestosql.seedstore.SeedStoreManager;
@@ -302,6 +303,7 @@ public class LocalQueryRunner
     private final CatalogConnectorStore catalogConnectorStore = new CatalogConnectorStore();
     private final HeuristicIndexerManager heuristicIndexerManager;
     private final CubeManager cubeManager;
+    private final GeneralExecutionHelperFactory executionHelperFactory;
     private boolean printPlan;
     private final CachedDataManager cachedDataManager;
     private final HetuConfig hetuConfig;
@@ -534,6 +536,7 @@ public class LocalQueryRunner
         SpillerStats spillerStats = new SpillerStats();
         this.singleStreamSpillerFactory = new FileSingleStreamSpillerFactory(metadata, spillerStats, featuresConfig, nodeSpillConfig, fileSystemClientManager);
         this.partitioningSpillerFactory = new GenericPartitioningSpillerFactory(this.singleStreamSpillerFactory);
+        this.executionHelperFactory = new GeneralExecutionHelperFactory(featuresConfig);
         this.spillerFactory = new GenericSpillerFactory(singleStreamSpillerFactory);
 
         this.recoveryUtils = new RecoveryUtils(fileSystemClientManager, new RecoveryConfig(), nodeManager);
@@ -862,7 +865,8 @@ public class LocalQueryRunner
                 exchangeManagerRegistry,
                 tableExecuteContextManager,
                 cachedDataManager,
-                hetuConfig);
+                hetuConfig,
+                executionHelperFactory);
 
         // plan query
         StageExecutionDescriptor stageExecutionDescriptor = subplan.getFragment().getStageExecutionDescriptor();

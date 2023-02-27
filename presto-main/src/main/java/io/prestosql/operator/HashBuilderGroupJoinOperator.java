@@ -20,6 +20,7 @@ import io.prestosql.memory.context.LocalMemoryContext;
 import io.prestosql.operator.aggregation.builder.AggregationBuilder;
 import io.prestosql.operator.aggregation.builder.InMemoryHashAggregationBuilder;
 import io.prestosql.operator.aggregation.builder.InMemoryHashAggregationBuilderWithReset;
+import io.prestosql.operator.groupjoin.ExecutionHelperFactory;
 import io.prestosql.spi.Page;
 import io.prestosql.sql.gen.JoinFilterFunctionCompiler;
 
@@ -37,6 +38,8 @@ import static java.util.Objects.requireNonNull;
 public class HashBuilderGroupJoinOperator
         implements SinkOperator
 {
+    private ExecutionHelperFactory executionHelperFactory;
+
     @VisibleForTesting
     public enum State
     {
@@ -103,6 +106,7 @@ public class HashBuilderGroupJoinOperator
     private final GroupJoinAggregator aggregator;
     private final GroupJoinAggregator aggrOnAggregator;
     private boolean aggregationInputProcessed;
+    private ListenableFuture<?> executionHelper = NOT_BLOCKED;
 
     public HashBuilderGroupJoinOperator(
             OperatorContext operatorContext,
@@ -120,8 +124,10 @@ public class HashBuilderGroupJoinOperator
             boolean spillEnabled,
             boolean spillToHdfsEnabled,
             GroupJoinAggregator aggregator,
-            GroupJoinAggregator aggrOnAggregator)
+            GroupJoinAggregator aggrOnAggregator,
+            ExecutionHelperFactory executionHelperFactory)
     {
+        this.executionHelperFactory = executionHelperFactory;
         requireNonNull(pagesIndexFactory, "pagesIndexFactory is null");
         this.operatorContext = operatorContext;
         this.partitionIndex = partitionIndex;
@@ -171,9 +177,23 @@ public class HashBuilderGroupJoinOperator
     {
         if (state == State.CONSUMING_INPUT) {
             if (aggrOutputPages != null) {
+                if (executionHelper != null) {
+                    return false;
+                }
+                executionHelper = executionHelperFactory.create().submitWork(() -> {
+                    processAggrOutputOrFullCase();
+                    executionHelper = null;
+                });
                 return false;
             }
             else if (aggregationBuilder != null && aggregationBuilder.isFull()) {
+                if (executionHelper != null) {
+                    return false;
+                }
+                executionHelper = executionHelperFactory.create().submitWork(() -> {
+                    processAggrOutputOrFullCase();
+                    executionHelper = null;
+                });
                 return false;
             }
             else if (lookupSourceFactoryDestroyed.isDone()) {
@@ -182,12 +202,21 @@ public class HashBuilderGroupJoinOperator
             else {
                 // TODO Vineet Need to move this out of needsInput and need to make it light weight.
                 if (unfinishedAggrWork != null) {
-                    boolean workDone = unfinishedAggrWork.process();
-                    aggregationBuilder.updateMemory();
-                    if (!workDone) {
+                    if (executionHelper != null) {
                         return false;
                     }
-                    unfinishedAggrWork = null;
+                    executionHelper = executionHelperFactory.create().submitWork(() -> {
+                        boolean workDone = unfinishedAggrWork.process();
+                        aggregationBuilder.updateMemory();
+                        while (!workDone) {
+                            workDone = unfinishedAggrWork.process();
+                            aggregationBuilder.updateMemory();
+                        }
+
+                        unfinishedAggrWork = null;
+                        executionHelper = null;
+                    });
+                    return false;
                 }
                 return true;
             }
@@ -290,6 +319,14 @@ public class HashBuilderGroupJoinOperator
         operatorContext.recordOutput(page.getSizeInBytes(), page.getPositionCount());
     }
 
+    private void processAggrOutputOrFullCase()
+    {
+        Page page = processAggregation();
+        if (page != null) {
+            updateIndex(page);
+        }
+    }
+
     public Page processAggregation()
     {
         if (state == State.AGGR_FINISHED) {
@@ -315,6 +352,11 @@ public class HashBuilderGroupJoinOperator
 
             if (aggregationBuilder == null) {
                 state = State.AGGR_FINISHED;
+                return null;
+            }
+
+            // Only flush if we are finishing(consuming input will change to AggrFinishing) or the aggregation builder is full
+            if (state == State.CONSUMING_INPUT && !aggregationBuilder.isFull()) {
                 return null;
             }
 
@@ -500,6 +542,18 @@ public class HashBuilderGroupJoinOperator
         catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public ListenableFuture<?> isBlocked()
+    {
+        if (state == State.CONSUMING_INPUT) {
+            if (executionHelper != null) {
+                return executionHelper.isDone() ? NOT_BLOCKED : executionHelper;
+            }
+        }
+
+        return NOT_BLOCKED;
     }
 
     @VisibleForTesting

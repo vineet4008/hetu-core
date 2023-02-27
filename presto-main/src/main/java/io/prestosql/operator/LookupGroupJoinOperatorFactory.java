@@ -20,6 +20,7 @@ import io.prestosql.operator.GroupJoinProbe.GroupJoinProbeFactory;
 import io.prestosql.operator.LookupJoinOperators.JoinType;
 import io.prestosql.operator.aggregation.AccumulatorFactory;
 import io.prestosql.operator.aggregation.partial.PartialAggregationController;
+import io.prestosql.operator.groupjoin.ExecutionHelperFactory;
 import io.prestosql.spi.plan.AggregationNode;
 import io.prestosql.spi.plan.PlanNodeId;
 import io.prestosql.spi.plan.Symbol;
@@ -50,6 +51,7 @@ public class LookupGroupJoinOperatorFactory
     private final GroupJoinProbeFactory joinProbeFactory;
     private final Optional<OuterOperatorFactoryResult> outerOperatorFactoryResult;
     private final JoinBridgeManager<? extends LookupSourceFactory> joinBridgeManager;
+    private ExecutionHelperFactory executionHelperFactory;
     private final OptionalInt totalOperatorsCount;
     private final HashGenerator probeHashGenerator;
     private final boolean forked;
@@ -82,7 +84,8 @@ public class LookupGroupJoinOperatorFactory
             GroupJoinAggregator aggrfactory,
             GroupJoinAggregator aggrOnAggrfactory,
             List<Integer> probeFinalOutputChannels,
-            List<Integer> buildFinalOutputChannels)
+            List<Integer> buildFinalOutputChannels,
+            ExecutionHelperFactory executionHelperFactory)
     {
         this.forked = forked;
         this.operatorId = operatorId;
@@ -94,6 +97,7 @@ public class LookupGroupJoinOperatorFactory
         this.joinProbeFactory = requireNonNull(joinProbeFactory, "joinProbeFactory is null");
 
         this.joinBridgeManager = lookupSourceFactoryManager;
+        this.executionHelperFactory = requireNonNull(executionHelperFactory, "executionHelperFactory is null");
         joinBridgeManager.incrementProbeFactoryCount();
         checkArgument(joinType == INNER, "joinType is not INNER");
         this.outerOperatorFactoryResult = Optional.empty();
@@ -180,7 +184,8 @@ public class LookupGroupJoinOperatorFactory
                 aggrfactory,
                 aggrOnAggrfactory,
                 probeFinalOutputChannels,
-                buildFinalOutputChannels);
+                buildFinalOutputChannels,
+                executionHelperFactory);
     }
 
     @Override
@@ -235,9 +240,16 @@ public class LookupGroupJoinOperatorFactory
         private PartitioningSpillerFactory partitioningSpillerFactory;
         private OptionalInt probeHashChannel;
         private List<Integer> probeJoinChannels;
+        private ExecutionHelperFactory executionHelperFactory;
 
         public Builder()
         {
+        }
+
+        public Builder withExecutorHelperFactory(ExecutionHelperFactory executionHelperFactory)
+        {
+            this.executionHelperFactory = requireNonNull(executionHelperFactory, "executionHelperFactory is null");
+            return this;
         }
 
         public Builder withJoinInfo(int operatorId,
@@ -370,7 +382,8 @@ public class LookupGroupJoinOperatorFactory
                     aggrfactory,
                     aggrOnAggrfactory,
                     probeFinalOutputChannels,
-                    buildFinalOutputChannels);
+                    buildFinalOutputChannels,
+                    executionHelperFactory);
         }
     }
 }

@@ -26,6 +26,7 @@ import io.prestosql.operator.aggregation.builder.AggregationBuilder;
 import io.prestosql.operator.aggregation.builder.InMemoryHashAggregationBuilder;
 import io.prestosql.operator.aggregation.builder.InMemoryHashAggregationBuilderWithReset;
 import io.prestosql.operator.exchange.LocalPartitionGenerator;
+import io.prestosql.operator.groupjoin.ExecutionHelperFactory;
 import io.prestosql.snapshot.SingleInputSnapshotState;
 import io.prestosql.spi.Page;
 import io.prestosql.spi.type.Type;
@@ -87,6 +88,7 @@ public class LookupGroupJoinOperator
     }
 
     private final OperatorContext operatorContext;
+    private ExecutionHelperFactory executionHelperFactory;
 
     private final GroupJoinProbeFactory joinProbeFactory;
     private final Runnable afterClose;
@@ -158,6 +160,7 @@ public class LookupGroupJoinOperator
     /*private boolean aggregationFinished;*/
     protected WorkProcessor<Page> aggrOutputPages;
     protected State state = State.CONSUMING_INPUT;
+    private ListenableFuture<?> executionHelper = NOT_BLOCKED;
 
     public LookupGroupJoinOperator(
             OperatorContext operatorContext,
@@ -177,9 +180,11 @@ public class LookupGroupJoinOperator
             GroupJoinAggregator aggregator,
             GroupJoinAggregator aggrOnAggregator,
             List<Integer> probeFinalOutputChannels,
-            List<Integer> buildFinalOutputChannels)
+            List<Integer> buildFinalOutputChannels,
+            ExecutionHelperFactory executionHelperFactory)
     {
         this.operatorContext = requireNonNull(operatorContext, "operatorContext is null");
+        this.executionHelperFactory = executionHelperFactory;
         List<Type> probeTypes1 = ImmutableList.copyOf(requireNonNull(probeTypes, "probeTypes is null"));
 
         requireNonNull(joinType, "joinType is null");
@@ -252,6 +257,11 @@ public class LookupGroupJoinOperator
     @Override
     public ListenableFuture<?> isBlocked()
     {
+        if (state == State.CONSUMING_INPUT) {
+            if (executionHelper != null) {
+                return executionHelper.isDone() ? NOT_BLOCKED : executionHelper;
+            }
+        }
         if (finishing) {
             return NOT_BLOCKED;
         }
@@ -272,12 +282,18 @@ public class LookupGroupJoinOperator
             else {
                 // TODO Vineet Need to move this out of needsInput and need to make it light weight.
                 if (unfinishedAggrWork != null) {
-                    boolean workDone = unfinishedAggrWork.process();
-                    aggregationBuilder.updateMemory();
-                    if (!workDone) {
-                        return false;
-                    }
-                    unfinishedAggrWork = null;
+                    executionHelper = executionHelperFactory.create().submitWork(() -> {
+                        boolean workDone = unfinishedAggrWork.process();
+                        aggregationBuilder.updateMemory();
+                        while (!workDone) {
+                            workDone = unfinishedAggrWork.process();
+                            aggregationBuilder.updateMemory();
+                        }
+
+                        unfinishedAggrWork = null;
+                        executionHelper = null;
+                    });
+                    return false;
                 }
                 return true;
             }
@@ -290,7 +306,7 @@ public class LookupGroupJoinOperator
     {
         requireNonNull(page, "page is null");
         checkState(probe == null, "Current page has not been completely processed yet");
-        checkState(tryFetchLookupSourceProvider(), "Not ready to handle input yet");
+        //checkState(tryFetchLookupSourceProvider(), "Not ready to handle input yet");
         // create Aggregators and pass page to them for process
         checkState(state == State.CONSUMING_INPUT, "Operator is already finishing");
         aggregationInputProcessed = true;
@@ -348,10 +364,19 @@ public class LookupGroupJoinOperator
     {
         switch (state) {
             case CONSUMING_INPUT:
+                if (probe == null) {
+                    if (aggregationBuilder != null && aggregationBuilder.isFull() && tryFetchLookupSourceProvider()) {
+                        finishAggregation();
+                        break;
+                    }
+                }
+                if (probe != null) {
+                    break;
+                }
                 return null;
             case AGGR_FINISHING:
             case AGGR_FINISHED:
-                if (probe == null) {
+                if (probe == null && tryFetchLookupSourceProvider()) {
                     finishAggregation();
                 }
                 break;
@@ -363,6 +388,9 @@ public class LookupGroupJoinOperator
         }
 
         if (probe == null && pageBuilder.isEmpty() && !finishing) {
+            return null;
+        }
+        if (!lookupSourceProviderFuture.isDone()) {
             return null;
         }
 
@@ -492,10 +520,10 @@ public class LookupGroupJoinOperator
                 return null;
             }
 
-            // only flush if we are finishing or the aggregation builder is full
-            /*if (!aggregationBuilder.isFull()) {
+            // Only flush if we are finishing(consuming input will change to AggrFinishing) or the aggregation builder is full
+            if (state == State.CONSUMING_INPUT && !aggregationBuilder.isFull()) {
                 return null;
-            }*/
+            }
 
             aggrOutputPages = aggregationBuilder.buildResult();
         }
