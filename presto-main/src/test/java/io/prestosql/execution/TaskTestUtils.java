@@ -41,6 +41,7 @@ import io.prestosql.metadata.Split;
 import io.prestosql.metastore.HetuMetaStoreManager;
 import io.prestosql.operator.LookupJoinOperators;
 import io.prestosql.operator.PagesIndex;
+import io.prestosql.operator.groupjoin.GeneralExecutionHelperFactory;
 import io.prestosql.operator.index.IndexJoinLookupStats;
 import io.prestosql.seedstore.SeedStoreManager;
 import io.prestosql.spi.connector.CatalogName;
@@ -189,7 +190,8 @@ public final class TaskTestUtils
                 cubeManager,
                 new ExchangeManagerRegistry(new ExchangeHandleResolver()),
                 tableExecuteContextManager,
-                new CachedDataManager(new HetuConfig(), new CacheStorageMonitor(new HetuConfig(), metadata), metadata, null, new SessionPropertyManager()), new HetuConfig());
+                new CachedDataManager(new HetuConfig(), new CacheStorageMonitor(new HetuConfig(), metadata), metadata, null, new SessionPropertyManager()), new HetuConfig(),
+                new GeneralExecutionHelperFactory(featuresConfig));
     }
 
     public static TaskInfo updateTask(SqlTask sqlTask, List<TaskSource> taskSources, OutputBuffers outputBuffers)
