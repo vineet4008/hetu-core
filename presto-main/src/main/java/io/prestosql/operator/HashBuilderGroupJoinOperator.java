@@ -164,6 +164,7 @@ public class HashBuilderGroupJoinOperator
 
         this.aggregator = aggregator;
         this.aggrOnAggregator = aggrOnAggregator;
+        createAggrOnAggregationBuilder();
     }
 
     @Override
@@ -178,6 +179,7 @@ public class HashBuilderGroupJoinOperator
         if (state == State.CONSUMING_INPUT) {
             if (aggrOutputPages != null) {
                 if (executionHelper != null) {
+                    checkAndResetExeHelper();
                     return false;
                 }
                 executionHelper = executionHelperFactory.create().submitWork(() -> {
@@ -188,6 +190,7 @@ public class HashBuilderGroupJoinOperator
             }
             else if (aggregationBuilder != null && aggregationBuilder.isFull()) {
                 if (executionHelper != null) {
+                    checkAndResetExeHelper();
                     return false;
                 }
                 executionHelper = executionHelperFactory.create().submitWork(() -> {
@@ -203,6 +206,7 @@ public class HashBuilderGroupJoinOperator
                 // TODO Vineet Need to move this out of needsInput and need to make it light weight.
                 if (unfinishedAggrWork != null) {
                     if (executionHelper != null) {
+                        checkAndResetExeHelper();
                         return false;
                     }
                     executionHelper = executionHelperFactory.create().submitWork(() -> {
@@ -222,6 +226,13 @@ public class HashBuilderGroupJoinOperator
             }
         }
         return false;
+    }
+
+    private void checkAndResetExeHelper()
+    {
+        if (executionHelper.isDone()) {
+            executionHelper = null;
+        }
     }
 
     @Override
@@ -258,6 +269,33 @@ public class HashBuilderGroupJoinOperator
         return aggregator.hasDistinct();
     }
 
+    public void createAggrOnAggregationBuilder()
+    {
+        if (aggregator.getStep().isOutputPartial() || !spillEnabled || hasOrderBy() || hasDistinct()) {
+            aggrOnAggregationBuilder = new InMemoryHashAggregationBuilderWithReset(
+                    aggrOnAggregator.getAccumulatorFactories(),
+                    aggrOnAggregator.getStep(),
+                    aggrOnAggregator.getExpectedGroups(),
+                    aggrOnAggregator.getGroupByTypes(),
+                    aggrOnAggregator.getGroupByChannels(),
+                    aggrOnAggregator.getHashChannel(),
+                    operatorContext,
+                    aggrOnAggregator.getMaxPartialMemory(),
+                    aggrOnAggregator.getJoinCompiler(),
+                    () -> {
+                        aggrOnAggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) aggrOnAggregationBuilder).getSizeInMemory());
+                        if (aggrOnAggregator.getStep().isOutputPartial() && aggrOnAggregator.getMaxPartialMemory().isPresent()) {
+                            // do not yield on memory for partial aggregations
+                            return true;
+                        }
+                        return operatorContext.isWaitingForMemory().isDone();
+                    });
+        }
+        else {
+            throw new UnsupportedOperationException("Not Supported");
+        }
+    }
+
     public void createAggregationBuilder()
     {
         if (aggregator.getStep().isOutputPartial() || !spillEnabled || hasOrderBy() || hasDistinct()) {
@@ -275,24 +313,6 @@ public class HashBuilderGroupJoinOperator
                     () -> {
                         aggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) aggregationBuilder).getSizeInMemory());
                         if (aggregator.getStep().isOutputPartial() && aggregator.getMaxPartialMemory().isPresent()) {
-                            // do not yield on memory for partial aggregations
-                            return true;
-                        }
-                        return operatorContext.isWaitingForMemory().isDone();
-                    });
-            aggrOnAggregationBuilder = new InMemoryHashAggregationBuilderWithReset(
-                    aggrOnAggregator.getAccumulatorFactories(),
-                    aggrOnAggregator.getStep(),
-                    aggrOnAggregator.getExpectedGroups(),
-                    aggrOnAggregator.getGroupByTypes(),
-                    aggrOnAggregator.getGroupByChannels(),
-                    aggrOnAggregator.getHashChannel(),
-                    operatorContext,
-                    aggrOnAggregator.getMaxPartialMemory(),
-                    aggrOnAggregator.getJoinCompiler(),
-                    () -> {
-                        aggrOnAggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) aggrOnAggregationBuilder).getSizeInMemory());
-                        if (aggrOnAggregator.getStep().isOutputPartial() && aggrOnAggregator.getMaxPartialMemory().isPresent()) {
                             // do not yield on memory for partial aggregations
                             return true;
                         }

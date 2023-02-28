@@ -150,14 +150,11 @@ public class LookupGroupJoinOperator
     protected LocalMemoryContext aggrOnAggrMemoryContext;
 
     private final HashCollisionsCounter hashCollisionsCounter;
-
-    /*protected boolean aggregationFinishing;*/
     protected long numberOfInputRowsProcessed;
     protected long numberOfUniqueRowsProduced;
     protected Work<?> unfinishedAggrWork;
     protected boolean aggregationInputProcessed;
     private final boolean spillEnabled = false;
-    /*private boolean aggregationFinished;*/
     protected WorkProcessor<Page> aggrOutputPages;
     protected State state = State.CONSUMING_INPUT;
     private ListenableFuture<?> executionHelper = NOT_BLOCKED;
@@ -223,6 +220,7 @@ public class LookupGroupJoinOperator
 
         this.aggregator = aggregator;
         this.aggrOnAggregator = aggrOnAggregator;
+        createAggrOnAggregationBuilder();
     }
 
     @Override
@@ -282,6 +280,10 @@ public class LookupGroupJoinOperator
             else {
                 // TODO Vineet Need to move this out of needsInput and need to make it light weight.
                 if (unfinishedAggrWork != null) {
+                    if (executionHelper != null) {
+                        checkAndResetExeHelper();
+                        return false;
+                    }
                     executionHelper = executionHelperFactory.create().submitWork(() -> {
                         boolean workDone = unfinishedAggrWork.process();
                         aggregationBuilder.updateMemory();
@@ -299,6 +301,13 @@ public class LookupGroupJoinOperator
             }
         }
         return false;
+    }
+
+    private void checkAndResetExeHelper()
+    {
+        if (executionHelper.isDone()) {
+            executionHelper = null;
+        }
     }
 
     @Override
@@ -467,6 +476,33 @@ public class LookupGroupJoinOperator
                         }
                         return operatorContext.isWaitingForMemory().isDone();
                     });
+            probeAggregationBuilder = new InMemoryHashAggregationBuilderWithReset(
+                    aggrOnAggregator.getAccumulatorFactories(),
+                    aggrOnAggregator.getStep(),
+                    aggrOnAggregator.getExpectedGroups(),
+                    aggrOnAggregator.getGroupByTypes(),
+                    aggrOnAggregator.getGroupByChannels(),
+                    aggrOnAggregator.getHashChannel(),
+                    operatorContext,
+                    aggrOnAggregator.getMaxPartialMemory(),
+                    aggrOnAggregator.getJoinCompiler(),
+                    () -> {
+                        aggrOnAggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) probeAggregationBuilder).getSizeInMemory());
+                        if (aggrOnAggregator.getStep().isOutputPartial() && aggrOnAggregator.getMaxPartialMemory().isPresent()) {
+                            // do not yield on memory for partial aggregations
+                            return true;
+                        }
+                        return operatorContext.isWaitingForMemory().isDone();
+                    });
+        }
+        else {
+            throw new UnsupportedOperationException("Not Supported");
+        }
+    }
+
+    public void createAggrOnAggregationBuilder()
+    {
+        if (aggregator.getStep().isOutputPartial() || !spillEnabled || hasOrderBy() || hasDistinct()) {
             probeAggregationBuilder = new InMemoryHashAggregationBuilderWithReset(
                     aggrOnAggregator.getAccumulatorFactories(),
                     aggrOnAggregator.getStep(),
