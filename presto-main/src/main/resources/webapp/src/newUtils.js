@@ -218,7 +218,7 @@ export function getChildren(nodeInfo: any)
         case 'JoinNode':
             return [nodeInfo.left, nodeInfo.right];
         case 'JoinOnAggregationNode':
-                return [nodeInfo.left, nodeInfo.right];
+            return [nodeInfo.leftAggr.source, nodeInfo.rightAggr.source];
         case 'SemiJoinNode':
             return [nodeInfo.source, nodeInfo.filteringSource];
         case 'SpatialJoinNode':
