@@ -3164,7 +3164,9 @@ public class LocalExecutionPlanner
                             probeFinalOutputChannels,
                             buildFinalOutputChannels,
                             outputTypes.build(),
-                            executionHelperFactory);
+                            executionHelperFactory,
+                            10_000,
+                            pagesIndexFactory);
                 default:
                     throw new UnsupportedOperationException("Unsupported join type: " + node.getType());
             }

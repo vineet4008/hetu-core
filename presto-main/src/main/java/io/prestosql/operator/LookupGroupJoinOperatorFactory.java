@@ -62,6 +62,9 @@ public class LookupGroupJoinOperatorFactory
     private final GroupJoinAggregator aggrOnAggrfactory;
     private final GroupJoinAggregator aggrfactory;
 
+    private final PagesIndex.Factory pagesIndexFactory;
+    private final int expectedPositions;
+
     public static Builder builder()
     {
         return new Builder();
@@ -85,7 +88,9 @@ public class LookupGroupJoinOperatorFactory
             GroupJoinAggregator aggrOnAggrfactory,
             List<Integer> probeFinalOutputChannels,
             List<Integer> buildFinalOutputChannels,
-            ExecutionHelperFactory executionHelperFactory)
+            ExecutionHelperFactory executionHelperFactory,
+            int expectedPositions,
+            PagesIndex.Factory pagesIndexFactory)
     {
         this.forked = forked;
         this.operatorId = operatorId;
@@ -120,6 +125,8 @@ public class LookupGroupJoinOperatorFactory
         this.aggrOnAggrfactory = aggrOnAggrfactory;
         this.probeFinalOutputChannels = probeFinalOutputChannels;
         this.buildFinalOutputChannels = buildFinalOutputChannels;
+        this.expectedPositions = expectedPositions;
+        this.pagesIndexFactory = pagesIndexFactory;
     }
 
     private LookupGroupJoinOperatorFactory(LookupGroupJoinOperatorFactory other)
@@ -147,6 +154,8 @@ public class LookupGroupJoinOperatorFactory
         this.probeFinalOutputChannels = other.probeFinalOutputChannels;
         this.buildFinalOutputChannels = other.buildFinalOutputChannels;
 
+        this.expectedPositions = other.expectedPositions;
+        this.pagesIndexFactory = other.pagesIndexFactory;
         this.closed = false;
         this.joinBridgeManager.incrementProbeFactoryCount();
     }
@@ -185,7 +194,9 @@ public class LookupGroupJoinOperatorFactory
                 aggrOnAggrfactory,
                 probeFinalOutputChannels,
                 buildFinalOutputChannels,
-                executionHelperFactory);
+                executionHelperFactory,
+                expectedPositions,
+                pagesIndexFactory);
     }
 
     @Override
@@ -241,6 +252,9 @@ public class LookupGroupJoinOperatorFactory
         private OptionalInt probeHashChannel;
         private List<Integer> probeJoinChannels;
         private ExecutionHelperFactory executionHelperFactory;
+
+        private PagesIndex.Factory pagesIndexFactory;
+        private int expectedPositions;
 
         public Builder()
         {
@@ -383,7 +397,9 @@ public class LookupGroupJoinOperatorFactory
                     aggrOnAggrfactory,
                     probeFinalOutputChannels,
                     buildFinalOutputChannels,
-                    executionHelperFactory);
+                    executionHelperFactory,
+                    expectedPositions,
+                    pagesIndexFactory);
         }
     }
 }

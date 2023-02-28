@@ -118,7 +118,9 @@ public class LookupJoinOperators
             List<Integer> probeFinalOutputChannels,
             List<Integer> buildFinalOutputChannels,
             List<Type> outputTypes,
-            ExecutionHelperFactory executionHelperFactory)
+            ExecutionHelperFactory executionHelperFactory,
+            int expectedPositions,
+            PagesIndex.Factory pagesIndexFactory)
     {
         return new LookupGroupJoinOperatorFactory(
                 operatorId,
@@ -138,6 +140,8 @@ public class LookupJoinOperators
                 aggrOnAggrfactory,
                 probeFinalOutputChannels,
                 buildFinalOutputChannels,
-                executionHelperFactory);
+                executionHelperFactory,
+                expectedPositions,
+                pagesIndexFactory);
     }
 }

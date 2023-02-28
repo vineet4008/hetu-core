@@ -149,6 +149,9 @@ public class LookupGroupJoinOperator
     protected LocalMemoryContext aggrMemoryContext;
     protected LocalMemoryContext aggrOnAggrMemoryContext;
 
+    private final LocalMemoryContext localUserMemoryContext;
+    private final LocalMemoryContext localRevocableMemoryContext;
+
     private final HashCollisionsCounter hashCollisionsCounter;
     protected long numberOfInputRowsProcessed;
     protected long numberOfUniqueRowsProduced;
@@ -158,6 +161,8 @@ public class LookupGroupJoinOperator
     protected WorkProcessor<Page> aggrOutputPages;
     protected State state = State.CONSUMING_INPUT;
     private ListenableFuture<?> executionHelper = NOT_BLOCKED;
+    private final PagesIndex index;
+    private Iterator<Page> pageIndexItr;
 
     public LookupGroupJoinOperator(
             OperatorContext operatorContext,
@@ -178,7 +183,9 @@ public class LookupGroupJoinOperator
             GroupJoinAggregator aggrOnAggregator,
             List<Integer> probeFinalOutputChannels,
             List<Integer> buildFinalOutputChannels,
-            ExecutionHelperFactory executionHelperFactory)
+            ExecutionHelperFactory executionHelperFactory,
+            int expectedPositions,
+            PagesIndex.Factory pagesIndexFactory)
     {
         this.operatorContext = requireNonNull(operatorContext, "operatorContext is null");
         this.executionHelperFactory = executionHelperFactory;
@@ -220,6 +227,10 @@ public class LookupGroupJoinOperator
 
         this.aggregator = aggregator;
         this.aggrOnAggregator = aggrOnAggregator;
+        requireNonNull(pagesIndexFactory, "pagesIndexFactory is null");
+        this.index = pagesIndexFactory.newPagesIndex(probeTypes, expectedPositions);
+        this.localUserMemoryContext = operatorContext.localUserMemoryContext();
+        this.localRevocableMemoryContext = operatorContext.localRevocableMemoryContext();
         createAggrOnAggregationBuilder();
     }
 
@@ -360,11 +371,26 @@ public class LookupGroupJoinOperator
         return true;
     }
 
+    private void updateIndex(Page page)
+    {
+        index.addPage(page);
+        if (spillEnabled) {
+            localRevocableMemoryContext.setBytes(index.getEstimatedSize().toBytes());
+        }
+        else {
+            if (!localUserMemoryContext.trySetBytes(index.getEstimatedSize().toBytes())) {
+                index.compact();
+                localUserMemoryContext.setBytes(index.getEstimatedSize().toBytes());
+            }
+        }
+        operatorContext.recordOutput(page.getSizeInBytes(), page.getPositionCount());
+    }
+
     private void finishAggregation()
     {
         Page page = processAggregation();
         if (page != null) {
-            createProbe(page);
+            updateIndex(page);
         }
     }
 
@@ -373,21 +399,29 @@ public class LookupGroupJoinOperator
     {
         switch (state) {
             case CONSUMING_INPUT:
-                if (probe == null) {
-                    if (aggregationBuilder != null && aggregationBuilder.isFull() && tryFetchLookupSourceProvider()) {
-                        finishAggregation();
-                        break;
-                    }
-                }
-                if (probe != null) {
+                // Only prepare the Aggr outputs
+                if (aggregationBuilder != null && aggregationBuilder.isFull()) {
+                    finishAggregation();
                     break;
                 }
                 return null;
             case AGGR_FINISHING:
-            case AGGR_FINISHED:
-                if (probe == null && tryFetchLookupSourceProvider()) {
+                if (aggregationBuilder != null) {
                     finishAggregation();
                 }
+            case AGGR_FINISHED:
+                if (pageIndexItr == null) {
+                    pageIndexItr = index.getPages();
+                }
+                if (probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && pageIndexItr.hasNext()) {
+                    createProbe(pageIndexItr.next());
+                }
+                if (probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && !pageIndexItr.hasNext() && finishing) {
+                    state = State.SOURCE_BUILT;
+                }
+                /*if (probe != null) {
+                    break;
+                }*/
                 break;
             case SOURCE_BUILT:
                 break;
@@ -530,7 +564,6 @@ public class LookupGroupJoinOperator
     public Page processAggregation()
     {
         if (state == State.AGGR_FINISHED) {
-            state = State.SOURCE_BUILT;
             return null;
         }
 
