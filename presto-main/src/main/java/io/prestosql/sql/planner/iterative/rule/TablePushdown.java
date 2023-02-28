@@ -27,6 +27,7 @@ import io.prestosql.spi.metadata.TableHandle;
 import io.prestosql.spi.plan.AggregationNode;
 import io.prestosql.spi.plan.Assignments;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.PlanNode;
 import io.prestosql.spi.plan.ProjectNode;
 import io.prestosql.spi.plan.Symbol;
@@ -187,12 +188,12 @@ public class TablePushdown
          * */
         stack.push(new NodeWithTreeDirection(node, DIRECTION.LEFT));
         if (!(node instanceof TableScanNode)) {
-            if (node instanceof JoinNode) {
+            if (node instanceof JoinNode || node instanceof JoinOnAggregationNode) {
                 if (updateStack(resolveNodeFromGroupReference(node, 0, lookup), lookup, stack)) {
                     return true;
                 }
                 else {
-                    while (!(stack.peek().getNode() instanceof JoinNode)) {
+                    while (!(stack.peek().getNode() instanceof JoinNode || stack.peek().getNode() instanceof JoinOnAggregationNode)) {
                         stack.pop();
                     }
                     NodeWithTreeDirection tempNode = stack.pop();
@@ -373,7 +374,7 @@ public class TablePushdown
 
         for (NodeWithTreeDirection nodeInPath : stack) {
             PlanNode node = nodeInPath.getNode();
-            if (node instanceof JoinNode) {
+            if (node instanceof JoinNode || node instanceof JoinOnAggregationNode) {
                 hasJoinInPath = true;
                 break;
             }
@@ -444,7 +445,7 @@ public class TablePushdown
             Stack<NodeWithTreeDirection> intermediateOuterTableStack = new Stack<>();
 
             // First pop the stack till we reach a join node and push into another intermediateOuterTableStack.
-            while (!(stack.peek().getNode() instanceof JoinNode)) {
+            while (!(stack.peek().getNode() instanceof JoinNode || stack.peek().getNode() instanceof JoinOnAggregationNode)) {
                 intermediateOuterTableStack.push(stack.pop());
             }
 

@@ -22,6 +22,7 @@ import io.prestosql.spi.metadata.TableHandle;
 import io.prestosql.spi.operator.ReuseExchangeOperator;
 import io.prestosql.spi.plan.FilterNode;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.PlanNode;
 import io.prestosql.spi.plan.PlanNodeIdAllocator;
 import io.prestosql.spi.plan.ProjectNode;
@@ -393,6 +394,12 @@ public class BeginTableWrite
                     return locateTableScanHandle(joinNode.getLeft());
                 }
             }
+            if (node instanceof JoinOnAggregationNode) {
+                JoinOnAggregationNode joinNode = (JoinOnAggregationNode) node;
+                if (joinNode.getType() == JoinNode.Type.INNER) {
+                    return locateTableScanHandle(joinNode.getLeft());
+                }
+            }
             throw new IllegalArgumentException("Invalid descendant for DeleteNode or UpdateNode" + node.getClass().getName());
         }
 
@@ -453,6 +460,13 @@ public class BeginTableWrite
             }
             if (node instanceof JoinNode) {
                 JoinNode joinNode = (JoinNode) node;
+                if (joinNode.getType() == JoinNode.Type.INNER) {
+                    PlanNode source = rewriteModifyTableScan(joinNode.getLeft(), handle);
+                    return replaceChildren(node, ImmutableList.of(source, joinNode.getRight()));
+                }
+            }
+            if (node instanceof JoinOnAggregationNode) {
+                JoinOnAggregationNode joinNode = (JoinOnAggregationNode) node;
                 if (joinNode.getType() == JoinNode.Type.INNER) {
                     PlanNode source = rewriteModifyTableScan(joinNode.getLeft(), handle);
                     return replaceChildren(node, ImmutableList.of(source, joinNode.getRight()));

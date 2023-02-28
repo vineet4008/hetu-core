@@ -198,6 +198,9 @@ public class PruneCTENodes
             else if (node instanceof JoinNode) {
                 return getProbeCTENodeId(((JoinNode) node).getLeft());
             }
+            else if (node instanceof JoinOnAggregationNode) {
+                return getProbeCTENodeId(((JoinOnAggregationNode) node).getLeft());
+            }
 
             return null;
         }
@@ -240,6 +243,10 @@ public class PruneCTENodes
                 PlanNode joinNode = ((JoinNode) node).getLeft();
                 return getChildCTERefNum(joinNode);
             }
+            else if (node instanceof JoinOnAggregationNode) {
+                PlanNode joinNode = ((JoinOnAggregationNode) node).getLeft();
+                return getChildCTERefNum(joinNode);
+            }
             return null;
         }
 
@@ -267,6 +274,11 @@ public class PruneCTENodes
                 level++;
                 return getChildCTELevel(joinNode, level);
             }
+            else if (node instanceof JoinOnAggregationNode) {
+                PlanNode joinNode = ((JoinOnAggregationNode) node).getLeft();
+                level++;
+                return getChildCTELevel(joinNode, level);
+            }
             return level;
         }
 
@@ -289,6 +301,18 @@ public class PruneCTENodes
                     // check if this join is self join
                     TableHandle left = getTableHandle(((JoinNode) node.getSource()).getLeft());
                     TableHandle right = getTableHandle(((JoinNode) node.getSource()).getRight());
+                    if (left != null && right != null && left.getConnectorHandle().equals(right.getConnectorHandle())) {
+                        // both tables are same, means it is self join.
+                        node = (CTEScanNode) visitPlan(node, context);
+                        return node.getSource();
+                    }
+                }
+
+                // If there is a self join below CTE node, then CTE should be removed.
+                if (node.getSource() instanceof JoinOnAggregationNode) {
+                    // check if this join is self join
+                    TableHandle left = getTableHandle(((JoinOnAggregationNode) node.getSource()).getLeft());
+                    TableHandle right = getTableHandle(((JoinOnAggregationNode) node.getSource()).getRight());
                     if (left != null && right != null && left.getConnectorHandle().equals(right.getConnectorHandle())) {
                         // both tables are same, means it is self join.
                         node = (CTEScanNode) visitPlan(node, context);

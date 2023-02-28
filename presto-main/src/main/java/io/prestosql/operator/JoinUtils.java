@@ -17,6 +17,7 @@ import com.google.common.collect.ImmutableList;
 import io.prestosql.spi.Page;
 import io.prestosql.spi.block.Block;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.PlanNode;
 import io.prestosql.spi.plan.ProjectNode;
 import io.prestosql.sql.planner.optimizations.PlanNodeSearcher;
@@ -65,6 +66,15 @@ public final class JoinUtils
         checkArgument(isInstanceOfAny(JoinNode.class, SemiJoinNode.class).test(node));
         if (node instanceof JoinNode) {
             return PlanNodeSearcher.searchFrom(((JoinNode) node).getRight())
+                    .recurseOnlyWhen(
+                            MorePredicates.<PlanNode>isInstanceOfAny(ProjectNode.class)
+                                    .or(JoinUtils::isLocalRepartitionExchange)
+                                    .or(JoinUtils::isLocalGatherExchange))  // used in cross join case
+                    .where(joinNode -> isRemoteReplicatedExchange(joinNode) || isRemoteReplicatedSourceNode(joinNode))
+                    .matches();
+        }
+        else if (node instanceof JoinOnAggregationNode) {
+            return PlanNodeSearcher.searchFrom(((JoinOnAggregationNode) node).getRight())
                     .recurseOnlyWhen(
                             MorePredicates.<PlanNode>isInstanceOfAny(ProjectNode.class)
                                     .or(JoinUtils::isLocalRepartitionExchange)

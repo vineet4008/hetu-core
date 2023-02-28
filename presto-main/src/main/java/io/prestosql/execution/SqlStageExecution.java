@@ -43,6 +43,7 @@ import io.prestosql.snapshot.QuerySnapshotManager;
 import io.prestosql.spi.PrestoException;
 import io.prestosql.spi.QueryId;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.PlanNode;
 import io.prestosql.spi.plan.PlanNodeId;
 import io.prestosql.spi.plan.TableScanNode;
@@ -246,6 +247,10 @@ public final class SqlStageExecution
             else if (node instanceof SemiJoinNode) {
                 SemiJoinNode semiJoinNode = (SemiJoinNode) node;
                 dynamicFilterService.registerTasks(semiJoinNode, allTasks, getScheduledNodes(), stateMachine);
+            }
+            else if (node instanceof JoinOnAggregationNode) {
+                JoinOnAggregationNode joinNode = (JoinOnAggregationNode) node;
+                dynamicFilterService.registerTasks(joinNode, allTasks, getScheduledNodes(), stateMachine);
             }
             traverseNodesForDynamicFiltering(node.getSources());
         }
