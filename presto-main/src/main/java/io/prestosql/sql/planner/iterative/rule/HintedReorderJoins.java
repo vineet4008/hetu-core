@@ -218,25 +218,43 @@ public class HintedReorderJoins
         private void flattenNode(PlanNode node, int limit)
         {
             // (limit - 2) because you need to account for adding left and right side
-            if (!(node instanceof JoinNode) || (sources.size() > (limit - 2))) {
+            if (!(node instanceof JoinNode || node instanceof JoinOnAggregationNode) || (sources.size() > (limit - 2))) {
                 sources.add(node);
                 return;
             }
 
-            JoinNode joinNode = (JoinNode) node;
-            if (joinNode.getType() != INNER
-                    || !logicalRowExpressions.isDeterministic(joinNode.getFilter().orElse(TRUE_CONSTANT))
-                    || joinNode.getDistributionType().isPresent()) {
-                sources.add(node);
-                return;
-            }
+            if (node instanceof JoinNode) {
+                JoinNode joinNode = (JoinNode) node;
+                if (joinNode.getType() != INNER
+                        || !logicalRowExpressions.isDeterministic(joinNode.getFilter().orElse(TRUE_CONSTANT))
+                        || joinNode.getDistributionType().isPresent()) {
+                    sources.add(node);
+                    return;
+                }
 
-            // we set the left limit to limit - 1 to account for the node on the right
-            flattenNode(joinNode.getLeft(), limit - 1);
-            flattenNode(joinNode.getRight(), limit);
-            joinNode.getCriteria().stream()
-                    .map(criteria -> toRowExpression(criteria, types))
-                    .forEach(filters::add);
+                // we set the left limit to limit - 1 to account for the node on the right
+                flattenNode(joinNode.getLeft(), limit - 1);
+                flattenNode(joinNode.getRight(), limit);
+                joinNode.getCriteria().stream()
+                        .map(criteria -> toRowExpression(criteria, types))
+                        .forEach(filters::add);
+            }
+            else if (node instanceof JoinOnAggregationNode) {
+                JoinOnAggregationNode joinNode = (JoinOnAggregationNode) node;
+                if (joinNode.getType() != INNER
+                        || !logicalRowExpressions.isDeterministic(joinNode.getFilter().orElse(TRUE_CONSTANT))
+                        || joinNode.getDistributionType().isPresent()) {
+                    sources.add(node);
+                    return;
+                }
+
+                // we set the left limit to limit - 1 to account for the node on the right
+                flattenNode(joinNode.getLeft(), limit - 1);
+                flattenNode(joinNode.getRight(), limit);
+                joinNode.getCriteria().stream()
+                        .map(criteria -> toRowExpression(criteria, types))
+                        .forEach(filters::add);
+            }
         }
 
         ReorderJoins.MultiJoinNode toMultiJoinNode()
@@ -770,26 +788,44 @@ public class HintedReorderJoins
                     PlanNode resolved = lookup.resolve(node);
 
                     // (limit - 2) because you need to account for adding left and right side
-                    if (!(resolved instanceof JoinNode) || (sources.size() > (limit - 2))) {
+                    if (!(resolved instanceof JoinNode || resolved instanceof JoinOnAggregationNode) || (sources.size() > (limit - 2))) {
                         sources.add(node);
                         return;
                     }
+                    if (resolved instanceof JoinNode) {
+                        JoinNode joinNode = (JoinNode) resolved;
+                        if (joinNode.getType() != INNER
+                                || !determinismEvaluator.isDeterministic(joinNode.getFilter().orElse(TRUE_CONSTANT))
+                                || joinNode.getDistributionType().isPresent()) {
+                            sources.add(node);
+                            return;
+                        }
 
-                    JoinNode joinNode = (JoinNode) resolved;
-                    if (joinNode.getType() != INNER
-                            || !determinismEvaluator.isDeterministic(joinNode.getFilter().orElse(TRUE_CONSTANT))
-                            || joinNode.getDistributionType().isPresent()) {
-                        sources.add(node);
-                        return;
+                        // we set the left limit to limit - 1 to account for the node on the right
+                        flattenNode(joinNode.getLeft(), limit - 1);
+                        flattenNode(joinNode.getRight(), limit);
+                        joinNode.getCriteria().stream()
+                                .map(criteria -> toRowExpression(criteria, types))
+                                .forEach(filters::add);
+                        joinNode.getFilter().ifPresent(filters::add);
                     }
+                    else if (resolved instanceof JoinOnAggregationNode) {
+                        JoinOnAggregationNode joinNode = (JoinOnAggregationNode) resolved;
+                        if (joinNode.getType() != INNER
+                                || !determinismEvaluator.isDeterministic(joinNode.getFilter().orElse(TRUE_CONSTANT))
+                                || joinNode.getDistributionType().isPresent()) {
+                            sources.add(node);
+                            return;
+                        }
 
-                    // we set the left limit to limit - 1 to account for the node on the right
-                    flattenNode(joinNode.getLeft(), limit - 1);
-                    flattenNode(joinNode.getRight(), limit);
-                    joinNode.getCriteria().stream()
-                            .map(criteria -> toRowExpression(criteria, types))
-                            .forEach(filters::add);
-                    joinNode.getFilter().ifPresent(filters::add);
+                        // we set the left limit to limit - 1 to account for the node on the right
+                        flattenNode(joinNode.getLeft(), limit - 1);
+                        flattenNode(joinNode.getRight(), limit);
+                        joinNode.getCriteria().stream()
+                                .map(criteria -> toRowExpression(criteria, types))
+                                .forEach(filters::add);
+                        joinNode.getFilter().ifPresent(filters::add);
+                    }
                 }
 
                 MultiJoinNode toMultiJoinNode()

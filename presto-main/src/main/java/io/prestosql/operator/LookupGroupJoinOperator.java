@@ -17,6 +17,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.Closer;
 import com.google.common.util.concurrent.ListenableFuture;
+import io.airlift.log.Logger;
 import io.prestosql.memory.context.LocalMemoryContext;
 import io.prestosql.operator.GroupJoinProbe.GroupJoinProbeFactory;
 import io.prestosql.operator.LookupJoinOperator.SpillInfoSnapshot;
@@ -86,6 +87,8 @@ public class LookupGroupJoinOperator
          */
         CLOSED
     }
+
+    private static final Logger LOG = Logger.get(LookupGroupJoinOperator.class);
 
     private final OperatorContext operatorContext;
     private ExecutionHelperFactory executionHelperFactory;
@@ -388,9 +391,14 @@ public class LookupGroupJoinOperator
 
     private void finishAggregation()
     {
+        DriverYieldSignal yieldSignal = operatorContext.getDriverContext().getYieldSignal();
         Page page = processAggregation();
-        if (page != null) {
+        while (page != null) {
             updateIndex(page);
+            if (yieldSignal.isSet()) {
+                break;
+            }
+            page = processAggregation();
         }
     }
 
@@ -402,13 +410,11 @@ public class LookupGroupJoinOperator
                 // Only prepare the Aggr outputs
                 if (aggregationBuilder != null && aggregationBuilder.isFull()) {
                     finishAggregation();
-                    break;
                 }
                 return null;
             case AGGR_FINISHING:
-                if (aggregationBuilder != null) {
-                    finishAggregation();
-                }
+                finishAggregation();
+                return null;
             case AGGR_FINISHED:
                 if (pageIndexItr == null) {
                     pageIndexItr = index.getPages();
@@ -470,6 +476,9 @@ public class LookupGroupJoinOperator
             verify(pageBuilder.isEmpty());
             Page output = outputPage;
             outputPage = null;
+            if (output.getPositionCount() > 1) {
+                LOG.error("Page has more than 1 record. %s", output);
+            }
             return output;
         }
 
@@ -580,12 +589,16 @@ public class LookupGroupJoinOperator
         if (aggrOutputPages == null) {
             if (!aggregationInputProcessed && aggregator.isProduceDefaultOutput()) {
                 // global aggregations always generate an output row with the default aggregation output (e.g. 0 for COUNT, NULL for SUM)
-                state = State.AGGR_FINISHED;
+                if (state == State.AGGR_FINISHING) {
+                    state = State.AGGR_FINISHED;
+                }
                 return aggregator.getGlobalAggregationOutput();
             }
 
             if (aggregationBuilder == null) {
-                state = State.AGGR_FINISHED;
+                if (state == State.AGGR_FINISHING) {
+                    state = State.AGGR_FINISHED;
+                }
                 return null;
             }
 
@@ -655,13 +668,13 @@ public class LookupGroupJoinOperator
         if (!value.isPresent()) {
             return;
         }
-        long joinPositionWithinPartition;
+        /*long joinPositionWithinPartition;
         if (joinPosition >= 0) {
             joinPositionWithinPartition = lookupSourceProvider.withLease(lookupSourceLease -> lookupSourceLease.getLookupSource().joinPositionWithinPartition(joinPosition));
         }
         else {
             joinPositionWithinPartition = -1;
-        }
+        }*/
         if (probe == null) {
             return;
         }
@@ -690,9 +703,9 @@ public class LookupGroupJoinOperator
                 if (!joinCurrentPosition(lookupSource, yieldSignal)) {
                     break;
                 }
-                if (!currentProbePositionProducedRow) {
+                /*if (!currentProbePositionProducedRow) {
                     currentProbePositionProducedRow = true;
-                }
+                }*/
             }
             currentProbePositionProducedRow = false;
             if (!advanceProbePosition(lookupSource)) {

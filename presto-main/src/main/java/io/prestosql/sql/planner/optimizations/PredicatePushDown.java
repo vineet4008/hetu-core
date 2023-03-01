@@ -40,6 +40,7 @@ import io.prestosql.spi.plan.CTEScanNode;
 import io.prestosql.spi.plan.FilterNode;
 import io.prestosql.spi.plan.GroupIdNode;
 import io.prestosql.spi.plan.JoinNode;
+import io.prestosql.spi.plan.JoinOnAggregationNode;
 import io.prestosql.spi.plan.MarkDistinctNode;
 import io.prestosql.spi.plan.PlanNode;
 import io.prestosql.spi.plan.PlanNodeIdAllocator;
@@ -1248,7 +1249,8 @@ public class PredicatePushDown
             // See if we can push the left effective predicate to the right side
             for (RowExpression conjunct : new RowExpressionEqualityInference.Builder(metadata, typeManager).nonInferrableConjuncts(leftEffectivePredicate)) {
                 // do not push down dynamic filters here
-                if (!(node instanceof JoinNode && getDescriptor(conjunct).isPresent() && ((JoinNode) node).getDynamicFilters().keySet().contains(getDescriptor(conjunct).get().getId()))) {
+                if (!((node instanceof JoinNode && getDescriptor(conjunct).isPresent() && ((JoinNode) node).getDynamicFilters().keySet().contains(getDescriptor(conjunct).get().getId()))
+                        || (node instanceof JoinOnAggregationNode && getDescriptor(conjunct).isPresent() && ((JoinOnAggregationNode) node).getDynamicFilters().keySet().contains(getDescriptor(conjunct).get().getId())))) {
                     RowExpression rewritten = allInference.rewriteExpression(conjunct, not(in(leftVariables)));
                     if (rewritten != null) {
                         rightPushDownConjuncts.add(rewritten);

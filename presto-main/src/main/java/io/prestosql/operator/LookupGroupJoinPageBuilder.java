@@ -117,6 +117,9 @@ public class LookupGroupJoinPageBuilder
     private Page processAggregationOnPage(long count, Page sourcePage, AggregationBuilder aggregationBuilder)
     {
         // TODO Vineet check on how to convert into future object and relate in normal code flow.
+        if (count == 1) {
+            return sourcePage;
+        }
         Page finalPage;
         for (int i = 0; i < count; i++) {
             Work<?> work = aggregationBuilder.processPage(sourcePage);
