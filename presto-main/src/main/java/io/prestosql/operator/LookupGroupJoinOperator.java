@@ -17,7 +17,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.Closer;
 import com.google.common.util.concurrent.ListenableFuture;
-import io.airlift.log.Logger;
 import io.prestosql.memory.context.LocalMemoryContext;
 import io.prestosql.operator.GroupJoinProbe.GroupJoinProbeFactory;
 import io.prestosql.operator.LookupJoinOperator.SpillInfoSnapshot;
@@ -87,8 +86,6 @@ public class LookupGroupJoinOperator
          */
         CLOSED
     }
-
-    private static final Logger LOG = Logger.get(LookupGroupJoinOperator.class);
 
     private final OperatorContext operatorContext;
     private ExecutionHelperFactory executionHelperFactory;
@@ -386,7 +383,6 @@ public class LookupGroupJoinOperator
                 localUserMemoryContext.setBytes(index.getEstimatedSize().toBytes());
             }
         }
-        operatorContext.recordOutput(page.getSizeInBytes(), page.getPositionCount());
     }
 
     private void finishAggregation()
@@ -476,9 +472,6 @@ public class LookupGroupJoinOperator
             verify(pageBuilder.isEmpty());
             Page output = outputPage;
             outputPage = null;
-            if (output.getPositionCount() > 1) {
-                LOG.error("Page has more than 1 record. %s", output);
-            }
             return output;
         }
 
