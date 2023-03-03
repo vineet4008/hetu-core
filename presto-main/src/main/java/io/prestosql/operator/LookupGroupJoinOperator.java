@@ -17,6 +17,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.Closer;
 import com.google.common.util.concurrent.ListenableFuture;
+import io.airlift.log.Logger;
 import io.prestosql.memory.context.LocalMemoryContext;
 import io.prestosql.operator.GroupJoinProbe.GroupJoinProbeFactory;
 import io.prestosql.operator.LookupJoinOperator.SpillInfoSnapshot;
@@ -86,6 +87,8 @@ public class LookupGroupJoinOperator
          */
         CLOSED
     }
+
+    private final Logger log = Logger.get(LookupGroupJoinOperator.class);
 
     private final OperatorContext operatorContext;
     private ExecutionHelperFactory executionHelperFactory;
@@ -247,6 +250,7 @@ public class LookupGroupJoinOperator
             return;
         }
         if (State.CONSUMING_INPUT == state) {
+            log.info("State changed to %s", State.AGGR_FINISHING);
             state = State.AGGR_FINISHING;
         }
         finishing = true;
@@ -407,18 +411,43 @@ public class LookupGroupJoinOperator
                 if (aggregationBuilder != null && aggregationBuilder.isFull()) {
                     finishAggregation();
                 }
+                if (lookupSourceProviderFuture.isDone()) {
+                    // eager processing of aggregated pages as build side is done.
+                    if (pageIndexItr == null) {
+                        log.info("Lookup Probe Page Itr created");
+                        pageIndexItr = index.getPages();
+                    }
+                    if (probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && pageIndexItr.hasNext()) {
+                        createProbe(pageIndexItr.next());
+                    }
+                    break;
+                }
                 return null;
             case AGGR_FINISHING:
                 finishAggregation();
+                if (lookupSourceProviderFuture.isDone()) {
+                    // eager processing of aggregated pages as build side is done.
+                    if (pageIndexItr == null) {
+                        log.info("Lookup Probe Page Itr created");
+                        pageIndexItr = index.getPages();
+                    }
+                    if (probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && pageIndexItr.hasNext()) {
+                        createProbe(pageIndexItr.next());
+                    }
+                    break;
+                }
                 return null;
             case AGGR_FINISHED:
+                // All Aggregation done, probe can start
                 if (pageIndexItr == null) {
+                    log.info("Lookup Probe Page Itr created");
                     pageIndexItr = index.getPages();
                 }
                 if (probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && pageIndexItr.hasNext()) {
                     createProbe(pageIndexItr.next());
                 }
                 if (probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && !pageIndexItr.hasNext() && finishing) {
+                    log.info("State changed to %s", State.SOURCE_BUILT);
                     state = State.SOURCE_BUILT;
                 }
                 /*if (probe != null) {
@@ -432,9 +461,9 @@ public class LookupGroupJoinOperator
                 return null;
         }
 
-        if (probe == null && pageBuilder.isEmpty() && !finishing) {
+        /*if (probe == null && pageBuilder.isEmpty()*//* && !finishing*//*) {
             return null;
-        }
+        }*/
         if (!lookupSourceProviderFuture.isDone()) {
             return null;
         }
@@ -450,7 +479,7 @@ public class LookupGroupJoinOperator
             lookupSourceProvider = new StaticLookupSourceProvider(new EmptyLookupSource());
         }
 
-        if (probe == null && finishing && unfinishedAggrWork == null && !unspilling) {
+        if (probe == null && finishing && state == State.SOURCE_BUILT) {
             /*
              * We do not have input probe and we won't have any, as we're finishing.
              * Let LookupSourceFactory know LookupSources can be disposed as far as we're concerned.
@@ -460,7 +489,7 @@ public class LookupGroupJoinOperator
             partitionedConsumption = lookupSourceFactory.finishProbeOperator(lookupJoinsCount);
             afterMemOpFinish.run();
             afterMemOpFinish = () -> {};
-            unspilling = true;
+            //unspilling = true;
             finished = true;
         }
 
@@ -583,6 +612,7 @@ public class LookupGroupJoinOperator
             if (!aggregationInputProcessed && aggregator.isProduceDefaultOutput()) {
                 // global aggregations always generate an output row with the default aggregation output (e.g. 0 for COUNT, NULL for SUM)
                 if (state == State.AGGR_FINISHING) {
+                    log.info("State changed to %s", State.AGGR_FINISHED);
                     state = State.AGGR_FINISHED;
                 }
                 return aggregator.getGlobalAggregationOutput();
@@ -590,6 +620,7 @@ public class LookupGroupJoinOperator
 
             if (aggregationBuilder == null) {
                 if (state == State.AGGR_FINISHING) {
+                    log.info("State changed to %s", State.AGGR_FINISHED);
                     state = State.AGGR_FINISHED;
                 }
                 return null;
@@ -742,6 +773,7 @@ public class LookupGroupJoinOperator
         try (Closer closer = Closer.create()) {
             // `afterClose` must be run last.
             // Closer is documented to mimic try-with-resource, which implies close will happen in reverse order.
+            closer.register(index::clear);
             closer.register(afterMemOpFinish::run);
             closer.register(afterClose::run);
 
