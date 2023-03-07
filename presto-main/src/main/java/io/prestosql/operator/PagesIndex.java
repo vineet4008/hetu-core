@@ -583,6 +583,42 @@ public class PagesIndex
         };
     }
 
+    public class PageIterator<P>
+            extends AbstractIterator<Page>
+    {
+        private int pageCounter;
+        private boolean isFinished;
+
+        @Override
+        protected Page computeNext()
+        {
+            if (pageCounter == channels[0].size()) {
+                if (isFinished) {
+                    return endOfData();
+                }
+                else {
+                    return null;
+                }
+            }
+
+            Block[] blocks = Stream.of(channels)
+                    .map(channel -> channel.get(pageCounter))
+                    .toArray(Block[]::new);
+            pageCounter++;
+            return new Page(blocks);
+        }
+
+        public void setFinished(boolean isFinished)
+        {
+            this.isFinished = isFinished;
+        }
+    }
+
+    public PageIterator<Page> getPagesIterator()
+    {
+        return new PageIterator<>();
+    }
+
     public Iterator<Page> getSortedPages()
     {
         return new AbstractIterator<Page>()

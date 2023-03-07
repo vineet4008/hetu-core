@@ -147,8 +147,8 @@ public class LookupGroupJoinOperator
     private List<Integer> spilledPartitionsList = new ArrayList<>();
 
     protected AggregationBuilder aggregationBuilder;
-    protected AggregationBuilder probeAggregationBuilder;
-    protected AggregationBuilder buildAggregationBuilder;
+    protected AggregationBuilder probeAggrOnAggregationBuilder;
+    protected AggregationBuilder buildAggrOnAggregationBuilder;
     protected LocalMemoryContext aggrMemoryContext;
     protected LocalMemoryContext aggrOnAggrMemoryContext;
 
@@ -270,14 +270,15 @@ public class LookupGroupJoinOperator
     @Override
     public ListenableFuture<?> isBlocked()
     {
-        if (state == State.CONSUMING_INPUT) {
+        if (state == State.CONSUMING_INPUT || state == State.AGGR_FINISHING) {
             if (executionHelper != null) {
                 return executionHelper.isDone() ? NOT_BLOCKED : executionHelper;
             }
-        }
-        if (finishing) {
             return NOT_BLOCKED;
         }
+        /*if (finishing) {
+            return NOT_BLOCKED;
+        }*/
 
         return lookupSourceProviderFuture;
     }
@@ -329,7 +330,7 @@ public class LookupGroupJoinOperator
     public void addInput(Page page)
     {
         requireNonNull(page, "page is null");
-        checkState(probe == null, "Current page has not been completely processed yet");
+        //`checkState(probe == null, "Current page has not been completely processed yet");
         //checkState(tryFetchLookupSourceProvider(), "Not ready to handle input yet");
         // create Aggregators and pass page to them for process
         checkState(state == State.CONSUMING_INPUT, "Operator is already finishing");
@@ -353,11 +354,11 @@ public class LookupGroupJoinOperator
     private void createProbe(Page page)
     {
         // create probe
-        if (buildAggregationBuilder == null) {
+        if (buildAggrOnAggregationBuilder == null) {
             LookupSource lookupSource = lookupSourceProvider.withLease((lookupSourceLease -> lookupSourceLease.getLookupSource()));
-            buildAggregationBuilder = lookupSource.getAggregationBuilder().duplicate();
+            buildAggrOnAggregationBuilder = lookupSource.getAggregationBuilder().duplicate();
         }
-        probe = joinProbeFactory.createGroupJoinProbe(page, false, lookupSourceProvider, probeAggregationBuilder, buildAggregationBuilder);
+        probe = joinProbeFactory.createGroupJoinProbe(page, false, lookupSourceProvider, probeAggrOnAggregationBuilder, buildAggrOnAggregationBuilder);
 
         // initialize to invalid join position to force output code to advance the cursors
         joinPosition = -1;
@@ -407,46 +408,32 @@ public class LookupGroupJoinOperator
     {
         switch (state) {
             case CONSUMING_INPUT:
-                // Only prepare the Aggr outputs
+                // Only prepare the Aggr outputs.
                 if (aggregationBuilder != null && aggregationBuilder.isFull()) {
                     finishAggregation();
                 }
                 if (lookupSourceProviderFuture.isDone()) {
                     // eager processing of aggregated pages as build side is done.
-                    if (pageIndexItr == null) {
-                        log.info("Lookup Probe Page Itr created");
-                        pageIndexItr = index.getPages();
-                    }
-                    if (probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && pageIndexItr.hasNext()) {
-                        createProbe(pageIndexItr.next());
-                    }
+                    createConditionalPageItrAndProbe();
                     break;
                 }
                 return null;
             case AGGR_FINISHING:
+                // Prepare the Aggr outputs for pending unprocessed pages.
                 finishAggregation();
                 if (lookupSourceProviderFuture.isDone()) {
                     // eager processing of aggregated pages as build side is done.
-                    if (pageIndexItr == null) {
-                        log.info("Lookup Probe Page Itr created");
-                        pageIndexItr = index.getPages();
-                    }
-                    if (probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && pageIndexItr.hasNext()) {
-                        createProbe(pageIndexItr.next());
-                    }
+                    createConditionalPageItrAndProbe();
                     break;
                 }
                 return null;
             case AGGR_FINISHED:
                 // All Aggregation done, probe can start
-                if (pageIndexItr == null) {
-                    log.info("Lookup Probe Page Itr created");
-                    pageIndexItr = index.getPages();
+                if (lookupSourceProviderFuture.isDone()) {
+                    createConditionalPageItrAndProbe();
                 }
-                if (probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && pageIndexItr.hasNext()) {
-                    createProbe(pageIndexItr.next());
-                }
-                if (probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && !pageIndexItr.hasNext() && finishing) {
+                // Terminal Condition.
+                if (finishing && probe == null && tryFetchLookupSourceProvider() && pageIndexItr != null && !pageIndexItr.hasNext()) {
                     log.info("State changed to %s", State.SOURCE_BUILT);
                     state = State.SOURCE_BUILT;
                 }
@@ -479,7 +466,7 @@ public class LookupGroupJoinOperator
             lookupSourceProvider = new StaticLookupSourceProvider(new EmptyLookupSource());
         }
 
-        if (probe == null && finishing && state == State.SOURCE_BUILT) {
+        if (probe == null && outputPage == null && state == State.SOURCE_BUILT) {
             /*
              * We do not have input probe and we won't have any, as we're finishing.
              * Let LookupSourceFactory know LookupSources can be disposed as far as we're concerned.
@@ -508,6 +495,25 @@ public class LookupGroupJoinOperator
         // because we will flush a page whenever we reach the probe end
         verify(probe != null || pageBuilder.isEmpty());
         return null;
+    }
+
+    private void createConditionalPageItrAndProbe()
+    {
+        if (pageIndexItr == null) {
+            log.info("Lookup Probe Page Itr created");
+            pageIndexItr = index.getPagesIterator();
+        }
+        if (pageIndexItr != null && finishing && state == State.AGGR_FINISHED) {
+            if (pageIndexItr instanceof PagesIndex.PageIterator) {
+                ((PagesIndex.PageIterator<Page>) pageIndexItr).setFinished(true);
+            }
+        }
+        if (probe == null && outputPage == null && tryFetchLookupSourceProvider() && pageIndexItr != null && pageIndexItr.hasNext()) {
+            Page page = pageIndexItr.next();
+            if (page != null) {
+                createProbe(page);
+            }
+        }
     }
 
     protected boolean hasOrderBy()
@@ -541,24 +547,6 @@ public class LookupGroupJoinOperator
                         }
                         return operatorContext.isWaitingForMemory().isDone();
                     });
-            probeAggregationBuilder = new InMemoryHashAggregationBuilderWithReset(
-                    aggrOnAggregator.getAccumulatorFactories(),
-                    aggrOnAggregator.getStep(),
-                    aggrOnAggregator.getExpectedGroups(),
-                    aggrOnAggregator.getGroupByTypes(),
-                    aggrOnAggregator.getGroupByChannels(),
-                    aggrOnAggregator.getHashChannel(),
-                    operatorContext,
-                    aggrOnAggregator.getMaxPartialMemory(),
-                    aggrOnAggregator.getJoinCompiler(),
-                    () -> {
-                        aggrOnAggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) probeAggregationBuilder).getSizeInMemory());
-                        if (aggrOnAggregator.getStep().isOutputPartial() && aggrOnAggregator.getMaxPartialMemory().isPresent()) {
-                            // do not yield on memory for partial aggregations
-                            return true;
-                        }
-                        return operatorContext.isWaitingForMemory().isDone();
-                    });
         }
         else {
             throw new UnsupportedOperationException("Not Supported");
@@ -567,8 +555,8 @@ public class LookupGroupJoinOperator
 
     public void createAggrOnAggregationBuilder()
     {
-        if (aggregator.getStep().isOutputPartial() || !spillEnabled || hasOrderBy() || hasDistinct()) {
-            probeAggregationBuilder = new InMemoryHashAggregationBuilderWithReset(
+        if (aggrOnAggregator.getStep().isOutputPartial() || !spillEnabled || hasOrderBy() || hasDistinct()) {
+            probeAggrOnAggregationBuilder = new InMemoryHashAggregationBuilderWithReset(
                     aggrOnAggregator.getAccumulatorFactories(),
                     aggrOnAggregator.getStep(),
                     aggrOnAggregator.getExpectedGroups(),
@@ -579,7 +567,7 @@ public class LookupGroupJoinOperator
                     aggrOnAggregator.getMaxPartialMemory(),
                     aggrOnAggregator.getJoinCompiler(),
                     () -> {
-                        aggrOnAggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) probeAggregationBuilder).getSizeInMemory());
+                        aggrOnAggrMemoryContext.setBytes(((InMemoryHashAggregationBuilder) probeAggrOnAggregationBuilder).getSizeInMemory());
                         if (aggrOnAggregator.getStep().isOutputPartial() && aggrOnAggregator.getMaxPartialMemory().isPresent()) {
                             // do not yield on memory for partial aggregations
                             return true;
@@ -667,12 +655,12 @@ public class LookupGroupJoinOperator
 
     protected void closeProbeAggrOnAggregationBuilder()
     {
-        if (probeAggregationBuilder != null) {
-            probeAggregationBuilder.recordHashCollisions(hashCollisionsCounter);
-            probeAggregationBuilder.close();
+        if (probeAggrOnAggregationBuilder != null) {
+            probeAggrOnAggregationBuilder.recordHashCollisions(hashCollisionsCounter);
+            probeAggrOnAggregationBuilder.close();
             // probeAggregationBuilder.close() will release all memory reserved in memory accounting.
             // The reference must be set to null afterwards to avoid unaccounted memory.
-            probeAggregationBuilder = null;
+            probeAggrOnAggregationBuilder = null;
         }
         aggrOnAggrMemoryContext.setBytes(0);
     }

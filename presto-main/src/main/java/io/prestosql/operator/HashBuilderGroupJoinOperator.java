@@ -271,7 +271,7 @@ public class HashBuilderGroupJoinOperator
 
     public void createAggrOnAggregationBuilder()
     {
-        if (aggregator.getStep().isOutputPartial() || !spillEnabled || hasOrderBy() || hasDistinct()) {
+        if (aggrOnAggregator.getStep().isOutputPartial() || !spillEnabled || hasOrderBy() || hasDistinct()) {
             aggrOnAggregationBuilder = new InMemoryHashAggregationBuilderWithReset(
                     aggrOnAggregator.getAccumulatorFactories(),
                     aggrOnAggregator.getStep(),
