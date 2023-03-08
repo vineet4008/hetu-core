@@ -121,6 +121,7 @@ import io.prestosql.sql.planner.iterative.rule.PushLimitThroughProject;
 import io.prestosql.sql.planner.iterative.rule.PushLimitThroughSemiJoin;
 import io.prestosql.sql.planner.iterative.rule.PushLimitThroughUnion;
 import io.prestosql.sql.planner.iterative.rule.PushOffsetThroughProject;
+import io.prestosql.sql.planner.iterative.rule.PushPartialAggregationProjectionsThroughJoin;
 import io.prestosql.sql.planner.iterative.rule.PushPartialAggregationThroughExchange;
 import io.prestosql.sql.planner.iterative.rule.PushPartialAggregationThroughJoin;
 import io.prestosql.sql.planner.iterative.rule.PushPredicateIntoTableScan;
@@ -761,6 +762,7 @@ public class PlanOptimizers
                 costCalculator,
                 ImmutableSet.of(
                         new PushPartialAggregationThroughJoin(),
+                        new PushPartialAggregationProjectionsThroughJoin(),
                         new PushPartialAggregationThroughExchange(metadata),
                         new PruneJoinColumns())));
 

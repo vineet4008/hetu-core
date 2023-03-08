@@ -96,6 +96,7 @@ import io.prestosql.sql.relational.OriginalExpressionUtils;
 import io.prestosql.sql.relational.SqlToRowExpressionTranslator;
 import io.prestosql.sql.tree.Expression;
 import io.prestosql.sql.tree.FunctionCall;
+import io.prestosql.sql.tree.LongLiteral;
 import io.prestosql.sql.tree.NodeRef;
 import io.prestosql.sql.tree.NullLiteral;
 import io.prestosql.testing.TestingHandle;
@@ -233,6 +234,14 @@ public class PlanBuilder
                 id,
                 ImmutableList.copyOf(columns),
                 nElements(rows, row -> nElements(columns.length, cell -> OriginalExpressionUtils.castToRowExpression(new NullLiteral()))));
+    }
+
+    public ValuesNode valuesLong(int rows, Symbol... columns)
+    {
+        return values(
+                idAllocator.getNextId(),
+                ImmutableList.copyOf(columns),
+                nElements(rows, row -> nElements(columns.length, cell -> OriginalExpressionUtils.castToRowExpression(new LongLiteral(String.valueOf(cell))))));
     }
 
     public ValuesNode values(List<Symbol> columns, List<List<RowExpression>> rows)

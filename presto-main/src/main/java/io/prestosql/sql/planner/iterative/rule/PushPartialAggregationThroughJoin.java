@@ -17,6 +17,9 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Streams;
 import io.prestosql.Session;
+import io.prestosql.SystemSessionProperties;
+import io.prestosql.cost.AggregationStatsRule;
+import io.prestosql.cost.PlanNodeStatsEstimate;
 import io.prestosql.matching.Capture;
 import io.prestosql.matching.Captures;
 import io.prestosql.matching.Pattern;
@@ -53,7 +56,7 @@ public class PushPartialAggregationThroughJoin
             .matching(PushPartialAggregationThroughJoin::isSupportedAggregationNode)
             .with(source().matching(join().capturedAs(JOIN_NODE)));
 
-    private static boolean isSupportedAggregationNode(AggregationNode aggregationNode)
+    protected static boolean isSupportedAggregationNode(AggregationNode aggregationNode)
     {
         // Don't split streaming aggregations
         if (aggregationNode.isStreamable()) {
@@ -90,16 +93,16 @@ public class PushPartialAggregationThroughJoin
 
         // TODO: leave partial aggregation above Join?
         if (allAggregationsOn(aggregationNode.getAggregations(), joinNode.getLeft().getOutputSymbols())) {
-            return Result.ofPlanNode(pushPartialToLeftChild(aggregationNode, joinNode, context));
+            return pushPartialToLeftChild(aggregationNode, joinNode, context);
         }
         if (allAggregationsOn(aggregationNode.getAggregations(), joinNode.getRight().getOutputSymbols())) {
-            return Result.ofPlanNode(pushPartialToRightChild(aggregationNode, joinNode, context));
+            return pushPartialToRightChild(aggregationNode, joinNode, context);
         }
 
         return Result.empty();
     }
 
-    private static boolean allAggregationsOn(Map<Symbol, Aggregation> aggregations, List<Symbol> symbols)
+    protected static boolean allAggregationsOn(Map<Symbol, Aggregation> aggregations, List<Symbol> symbols)
     {
         Set<Symbol> inputs = aggregations.values().stream()
                 .map(SymbolsExtractor::extractAll)
@@ -108,20 +111,75 @@ public class PushPartialAggregationThroughJoin
         return symbols.containsAll(inputs);
     }
 
-    private PlanNode pushPartialToLeftChild(AggregationNode node, JoinNode child, Context context)
+    private double getOutToInApplicabilityRatio(Context context)
+    {
+        return SystemSessionProperties.getPushAggregationThroughJoinOutToInRatio(context.getSession());
+    }
+
+    private double getJoinSelectivityRatio(Context context)
+    {
+        return SystemSessionProperties.getPushAggregationThroughJoinSelectivity(context.getSession());
+    }
+
+    private boolean isAggrNodeNotReduceOutputRows(Context context, AggregationNode pushedAggregation)
+    {
+        PlanNodeStatsEstimate sourceStats = context.getStatsProvider().getStats(pushedAggregation.getSource());
+        PlanNodeStatsEstimate aggrNodeStats = AggregationStatsRule.groupBy(sourceStats, pushedAggregation.getGroupingKeys(), pushedAggregation.getAggregations());
+        if (sourceStats.isOutputRowCountUnknown() || aggrNodeStats.isOutputRowCountUnknown()) {
+            return true;
+        }
+        return aggrNodeStats.getOutputRowCount() / sourceStats.getOutputRowCount() > getOutToInApplicabilityRatio(context);
+    }
+
+    private boolean hasHighSelectivityForJoin(JoinNode joinNode, Context context, boolean isAggrPushedToLeft)
+    {
+        PlanNodeStatsEstimate childStats;
+        if (isAggrPushedToLeft) {
+            childStats = context.getStatsProvider().getStats(joinNode.getLeft());
+        }
+        else {
+            childStats = context.getStatsProvider().getStats(joinNode.getRight());
+        }
+        PlanNodeStatsEstimate joinStats = context.getStatsProvider().getStats(joinNode);
+        if (joinStats.isOutputRowCountUnknown() || childStats.isOutputRowCountUnknown()) {
+            return false;
+        }
+
+        return joinStats.getOutputRowCount() / childStats.getOutputRowCount() >= getJoinSelectivityRatio(context);
+    }
+
+    protected Result pushPartialToLeftChild(AggregationNode node, JoinNode child, Context context)
     {
         Set<Symbol> joinLeftChildSymbols = ImmutableSet.copyOf(child.getLeft().getOutputSymbols());
         List<Symbol> groupingSet = getPushedDownGroupingSet(node, joinLeftChildSymbols, intersection(getJoinRequiredSymbols(child), joinLeftChildSymbols));
         AggregationNode pushedAggregation = replaceAggregationSource(node, child.getLeft(), groupingSet);
-        return pushPartialToJoin(node, child, pushedAggregation, child.getRight(), context);
+
+        // Apply only if can reduce the record count
+        if (isAggrNodeNotReduceOutputRows(context, pushedAggregation)) {
+            return Result.empty();
+        }
+
+        if (hasHighSelectivityForJoin(child, context, true)) {
+            return Result.ofPlanNode(pushPartialToJoin(node, child, pushedAggregation, child.getRight(), context));
+        }
+        return Result.empty();
     }
 
-    private PlanNode pushPartialToRightChild(AggregationNode node, JoinNode child, Context context)
+    protected Result pushPartialToRightChild(AggregationNode node, JoinNode child, Context context)
     {
         Set<Symbol> joinRightChildSymbols = ImmutableSet.copyOf(child.getRight().getOutputSymbols());
         List<Symbol> groupingSet = getPushedDownGroupingSet(node, joinRightChildSymbols, intersection(getJoinRequiredSymbols(child), joinRightChildSymbols));
         AggregationNode pushedAggregation = replaceAggregationSource(node, child.getRight(), groupingSet);
-        return pushPartialToJoin(node, child, child.getLeft(), pushedAggregation, context);
+
+        // Apply only if can reduce the record count
+        if (isAggrNodeNotReduceOutputRows(context, pushedAggregation)) {
+            return Result.empty();
+        }
+
+        if (hasHighSelectivityForJoin(child, context, false)) {
+            return Result.ofPlanNode(pushPartialToJoin(node, child, child.getLeft(), pushedAggregation, context));
+        }
+        return Result.empty();
     }
 
     private Set<Symbol> getJoinRequiredSymbols(JoinNode node)
