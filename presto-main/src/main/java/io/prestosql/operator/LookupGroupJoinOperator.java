@@ -330,7 +330,7 @@ public class LookupGroupJoinOperator
     public void addInput(Page page)
     {
         requireNonNull(page, "page is null");
-        //`checkState(probe == null, "Current page has not been completely processed yet");
+        //checkState(probe == null, "Current page has not been completely processed yet");
         //checkState(tryFetchLookupSourceProvider(), "Not ready to handle input yet");
         // create Aggregators and pass page to them for process
         checkState(state == State.CONSUMING_INPUT, "Operator is already finishing");
