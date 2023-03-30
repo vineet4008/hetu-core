@@ -15,10 +15,11 @@ package io.prestosql.operator;
 
 import com.google.common.collect.ImmutableList;
 import io.prestosql.spi.block.Block;
-import io.prestosql.spi.block.BlockBuilder;
+import io.prestosql.spi.block.LongArrayBlock;
 import io.prestosql.spi.type.Type;
 
 import java.util.List;
+import java.util.Optional;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
@@ -110,7 +111,7 @@ public abstract class BigintGroupBy
     protected class GetGroupIdsWork
             implements Work<GroupByIdBlock>
     {
-        private final BlockBuilder blockBuilder;
+        private final long[] groupIds;
         private final Block block;
 
         private boolean finished;
@@ -121,7 +122,7 @@ public abstract class BigintGroupBy
         {
             this.block = requireNonNull(block, "block is null");
             // we know the exact size required for the block
-            this.blockBuilder = BIGINT.createFixedSizeBlockBuilder(block.getPositionCount());
+            this.groupIds = new long[block.getPositionCount()];
             this.groupBy = groupBy;
         }
 
@@ -142,7 +143,7 @@ public abstract class BigintGroupBy
             // Therefore needRehash will not generally return true even if we have just crossed the capacity boundary.
             while (lastPosition < positionCount && !groupBy.needMoreCapacity()) {
                 // output the group id for this row
-                BIGINT.writeLong(blockBuilder, groupBy.putIfAbsent(lastPosition, block));
+                groupIds[lastPosition] = groupBy.putIfAbsent(lastPosition, block);
                 lastPosition++;
             }
             return lastPosition == positionCount;
@@ -154,7 +155,7 @@ public abstract class BigintGroupBy
             checkState(lastPosition == block.getPositionCount(), "process has not yet finished");
             checkState(!finished, "result has produced");
             finished = true;
-            return new GroupByIdBlock(nextGroupId, blockBuilder.build());
+            return new GroupByIdBlock(nextGroupId, new LongArrayBlock(block.getPositionCount(), Optional.empty(), groupIds));
         }
     }
 }

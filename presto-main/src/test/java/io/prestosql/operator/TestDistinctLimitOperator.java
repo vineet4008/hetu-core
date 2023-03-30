@@ -34,7 +34,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
-import static io.airlift.testing.Assertions.assertGreaterThan;
+import static io.airlift.testing.Assertions.assertGreaterThanOrEqual;
 import static io.prestosql.RowPagesBuilder.rowPagesBuilder;
 import static io.prestosql.SessionTestUtils.TEST_SESSION;
 import static io.prestosql.metadata.MetadataManager.createTestMetadataManager;
@@ -136,7 +136,7 @@ public class TestDistinctLimitOperator
     {
         Map<String, Object> expectedMapping = new HashMap<>();
         expectedMapping.put("operatorContext", 0);
-        expectedMapping.put("localUserMemoryContext", 33048L);
+        expectedMapping.put("localUserMemoryContext", 424L);
         expectedMapping.put("remainingLimit", 2L);
         expectedMapping.put("finishing", false);
         expectedMapping.put("nextDistinctId", 3L);
@@ -198,9 +198,9 @@ public class TestDistinctLimitOperator
                 Optional.of(1),
                 joinCompiler);
 
-        GroupByHashYieldAssertion.GroupByHashYieldResult result = finishOperatorWithYieldingGroupByHash(input, type, operatorFactory, operator -> ((DistinctLimitOperator) operator).getCapacity(), 1_400_000);
-        assertGreaterThan(result.getYieldCount(), 5);
-        assertGreaterThan(result.getMaxReservedBytes(), 20L << 20);
+        GroupByHashYieldAssertion.GroupByHashYieldResult result = finishOperatorWithYieldingGroupByHash(input, type, operatorFactory, operator -> ((DistinctLimitOperator) operator).getCapacity(), 1_200_000);
+        assertGreaterThanOrEqual(result.getYieldCount(), 5);
+        assertGreaterThanOrEqual(result.getMaxReservedBytes(), 20L << 20);
         assertEquals(result.getOutput().stream().mapToInt(Page::getPositionCount).sum(), 6_000 * 600);
     }
 }

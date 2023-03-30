@@ -21,6 +21,7 @@ import io.prestosql.spi.Page;
 import io.prestosql.spi.block.Block;
 import io.prestosql.spi.block.BlockBuilder;
 import io.prestosql.spi.block.DictionaryBlock;
+import io.prestosql.spi.block.LongArrayBlock;
 import io.prestosql.spi.block.RunLengthEncodedBlock;
 import io.prestosql.spi.snapshot.BlockEncodingSerdeProvider;
 import io.prestosql.spi.snapshot.Restorable;
@@ -439,7 +440,7 @@ public abstract class MultiChannelGroupBy
     protected class GetDictionaryGroupIdsWork
             implements Work<GroupByIdBlock>
     {
-        private final BlockBuilder blockBuilder;
+        private final long[] groupIds;
         private final Page page;
         private final Page dictionaryPage;
         private final DictionaryBlock dictionaryBlock;
@@ -458,7 +459,7 @@ public abstract class MultiChannelGroupBy
             this.dictionaryPage = createPageWithExtractedDictionary(page);
 
             // we know the exact size required for the block
-            this.blockBuilder = BIGINT.createFixedSizeBlockBuilder(page.getPositionCount());
+            this.groupIds = new long[page.getPositionCount()];
             this.groupBy = groupBy;
         }
 
@@ -480,7 +481,7 @@ public abstract class MultiChannelGroupBy
             while (lastPosition < positionCount && !groupBy.needMoreCapacity()) {
                 int positionInDictionary = dictionaryBlock.getId(lastPosition);
                 int groupId = getGroupId(hashGenerator, dictionaryPage, positionInDictionary, groupBy);
-                BIGINT.writeLong(blockBuilder, groupId);
+                groupIds[lastPosition] = groupId;
                 lastPosition++;
             }
             return lastPosition == positionCount;
@@ -492,7 +493,7 @@ public abstract class MultiChannelGroupBy
             checkState(lastPosition == page.getPositionCount(), "process has not yet finished");
             checkState(!finished, "result has produced");
             finished = true;
-            return new GroupByIdBlock(groupBy.getGroupCount(), blockBuilder.build());
+            return new GroupByIdBlock(groupBy.getGroupCount(), new LongArrayBlock(page.getPositionCount(), Optional.empty(), groupIds));
         }
     }
 

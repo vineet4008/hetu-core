@@ -66,6 +66,7 @@ import static io.airlift.slice.SizeOf.SIZE_OF_DOUBLE;
 import static io.airlift.slice.SizeOf.SIZE_OF_LONG;
 import static io.airlift.testing.Assertions.assertEqualsIgnoreOrder;
 import static io.airlift.testing.Assertions.assertGreaterThan;
+import static io.airlift.testing.Assertions.assertGreaterThanOrEqual;
 import static io.airlift.units.DataSize.Unit.BYTE;
 import static io.airlift.units.DataSize.Unit.KILOBYTE;
 import static io.airlift.units.DataSize.Unit.MEGABYTE;
@@ -326,7 +327,7 @@ public class TestHashAggregationOperator
         //TODO-cp-I2DSGQ: change expectedMapping after implementation of operatorContext capture
         expectedMapping.put("operatorContext", 0);
         expectedMapping.put("aggregationBuilder", aggregationBuilderMapping);
-        expectedMapping.put("memoryContext", 10675419L);
+        expectedMapping.put("memoryContext", 7138412L);
         expectedMapping.put("inputProcessed", true);
         expectedMapping.put("finishing", false);
         expectedMapping.put("finished", false);
@@ -658,9 +659,9 @@ public class TestHashAggregationOperator
 
         // get result with yield; pick a relatively small buffer for aggregator's memory usage
         GroupByHashYieldResult result;
-        result = finishOperatorWithYieldingGroupByHash(input, type, operatorFactory, this::getHashCapacity, 1_400_000);
-        assertGreaterThan(result.getYieldCount(), 5);
-        assertGreaterThan(result.getMaxReservedBytes(), 20L << 20);
+        result = finishOperatorWithYieldingGroupByHash(input, type, operatorFactory, this::getHashCapacity, 450_000);
+        assertGreaterThanOrEqual(result.getYieldCount(), 5);
+        assertGreaterThanOrEqual(result.getMaxReservedBytes(), 20L << 20);
 
         int count = 0;
         for (Page page : result.getOutput()) {

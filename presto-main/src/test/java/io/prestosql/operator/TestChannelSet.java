@@ -23,6 +23,7 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -104,9 +105,16 @@ public class TestChannelSet
     private Map<String, Object> createChannelSetExpectedMapping()
     {
         Map<String, Object> groupByHashMapping = new HashMap<>();
-        Map<String, Object> valuesMapping = new HashMap<>();
-        Map<String, Object> groupIdsMapping = new HashMap<>();
-        Map<String, Object> valuesByGroupIdMapping = new HashMap<>();
+        List<Long> valuesMapping = new ArrayList<>(8);
+        List<Integer> groupIdsMapping = new ArrayList<>(8);
+        List<Long> valuesByGroupIdMapping = new ArrayList<>(6);
+        for (int i = 0; i < 8; i++) {
+            valuesMapping.add(0L);
+            groupIdsMapping.add(-1);
+        }
+        for (int i = 0; i < 6; i++) {
+            valuesByGroupIdMapping.add(0L);
+        }
 
         groupByHashMapping.put("hashCapacity", 8);
         groupByHashMapping.put("currentPageSizeInBytes", 220L);
@@ -121,18 +129,6 @@ public class TestChannelSet
         groupByHashMapping.put("expectedHashCollisions", 0.0);
         groupByHashMapping.put("preallocatedMemoryInBytes", 0L);
 
-        valuesMapping.put("array", long[][].class);
-        valuesMapping.put("capacity", 1024);
-        valuesMapping.put("segments", 1);
-
-        groupIdsMapping.put("array", int[][].class);
-        groupIdsMapping.put("capacity", 1024);
-        groupIdsMapping.put("segments", 1);
-
-        valuesByGroupIdMapping.put("array", long[][].class);
-        valuesByGroupIdMapping.put("capacity", 1024);
-        valuesByGroupIdMapping.put("segments", 1);
-
         return groupByHashMapping;
     }
 
@@ -140,9 +136,16 @@ public class TestChannelSet
     {
         Map<String, Object> expectedMapping = new HashMap<>();
         Map<String, Object> groupByHashMapping = new HashMap<>();
-        Map<String, Object> valuesMapping = new HashMap<>();
-        Map<String, Object> groupIdsMapping = new HashMap<>();
-        Map<String, Object> valuesByGroupIdMapping = new HashMap<>();
+        List<Long> valuesMapping = new ArrayList<>(8);
+        List<Integer> groupIdsMapping = new ArrayList<>(8);
+        List<Long> valuesByGroupIdMapping = new ArrayList<>(6);
+        for (int i = 0; i < 8; i++) {
+            valuesMapping.add(0L);
+            groupIdsMapping.add(-1);
+        }
+        for (int i = 0; i < 6; i++) {
+            valuesByGroupIdMapping.add(0L);
+        }
 
         expectedMapping.put("hash", groupByHashMapping);
 
@@ -158,18 +161,6 @@ public class TestChannelSet
         groupByHashMapping.put("hashCollisions", 0L);
         groupByHashMapping.put("expectedHashCollisions", 0.0);
         groupByHashMapping.put("preallocatedMemoryInBytes", 0L);
-
-        valuesMapping.put("array", long[][].class);
-        valuesMapping.put("capacity", 1024);
-        valuesMapping.put("segments", 1);
-
-        groupIdsMapping.put("array", int[][].class);
-        groupIdsMapping.put("capacity", 1024);
-        groupIdsMapping.put("segments", 1);
-
-        valuesByGroupIdMapping.put("array", long[][].class);
-        valuesByGroupIdMapping.put("capacity", 1024);
-        valuesByGroupIdMapping.put("segments", 1);
 
         expectedMapping.put("operatorContext", 0);
         expectedMapping.put("localMemoryContext", 0L);

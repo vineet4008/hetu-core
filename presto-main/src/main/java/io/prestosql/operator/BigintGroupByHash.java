@@ -14,8 +14,6 @@
 package io.prestosql.operator;
 
 import com.google.common.annotations.VisibleForTesting;
-import io.prestosql.array.IntBigArray;
-import io.prestosql.array.LongBigArray;
 import io.prestosql.spi.Page;
 import io.prestosql.spi.PageBuilder;
 import io.prestosql.spi.PrestoException;
@@ -29,9 +27,11 @@ import io.prestosql.type.BigintOperators;
 import org.openjdk.jol.info.ClassLayout;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.List;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static io.airlift.slice.SizeOf.sizeOf;
 import static io.prestosql.spi.StandardErrorCode.GENERIC_INSUFFICIENT_RESOURCES;
 import static io.prestosql.spi.type.BigintType.BIGINT;
 import static io.prestosql.type.TypeUtils.NULL_HASH_CODE;
@@ -51,11 +51,11 @@ public class BigintGroupByHash
     private int mask;
 
     // the hash table from values to groupIds
-    private LongBigArray values;
-    private IntBigArray groupIds;
+    private long[] values;
+    private int[] groupIds;
 
     // reverse index from the groupId back to the value
-    private final LongBigArray valuesByGroupId;
+    private long[] valuesByGroupId;
 
     private long hashCollisions;
     private double expectedHashCollisions;
@@ -74,13 +74,11 @@ public class BigintGroupByHash
 
         maxFill = calculateMaxFill(hashCapacity);
         mask = hashCapacity - 1;
-        values = new LongBigArray();
-        values.ensureCapacity(hashCapacity);
-        groupIds = new IntBigArray(-1);
-        groupIds.ensureCapacity(hashCapacity);
+        values = new long[hashCapacity];
+        groupIds = new int[hashCapacity];
+        Arrays.fill(groupIds, -1);
 
-        valuesByGroupId = new LongBigArray();
-        valuesByGroupId.ensureCapacity(hashCapacity);
+        valuesByGroupId = new long[maxFill];
 
         // This interface is used for actively reserving memory (push model) for rehash.
         // The caller can also query memory usage on this object (pull model)
@@ -103,9 +101,9 @@ public class BigintGroupByHash
     public long getEstimatedSize()
     {
         return INSTANCE_SIZE +
-                groupIds.sizeOf() +
-                values.sizeOf() +
-                valuesByGroupId.sizeOf() +
+                sizeOf(groupIds) +
+                sizeOf(values) +
+                sizeOf(valuesByGroupId) +
                 preallocatedMemoryInBytes;
     }
 
@@ -130,7 +128,7 @@ public class BigintGroupByHash
             blockBuilder.appendNull();
         }
         else {
-            BIGINT.writeLong(blockBuilder, valuesByGroupId.get(groupId));
+            BIGINT.writeLong(blockBuilder, valuesByGroupId[groupId]);
         }
 
         if (outputRawHash) {
@@ -139,7 +137,7 @@ public class BigintGroupByHash
                 BIGINT.writeLong(hashBlockBuilder, NULL_HASH_CODE);
             }
             else {
-                BIGINT.writeLong(hashBlockBuilder, BigintOperators.hashCode(valuesByGroupId.get(groupId)));
+                BIGINT.writeLong(hashBlockBuilder, BigintOperators.hashCode(valuesByGroupId[groupId]));
             }
         }
     }
@@ -167,15 +165,15 @@ public class BigintGroupByHash
         }
 
         long value = BIGINT.getLong(block, position);
-        long hashPosition = getHashPosition(value, mask);
+        int hashPosition = getHashPosition(value, mask);
 
         // look for an empty slot or a slot containing this key
         while (true) {
-            int groupId = groupIds.get(hashPosition);
+            int groupId = groupIds[hashPosition];
             if (groupId == -1) {
                 return false;
             }
-            if (value == values.get(hashPosition)) {
+            if (value == values[hashPosition]) {
                 return true;
             }
 
@@ -187,7 +185,7 @@ public class BigintGroupByHash
     @Override
     public long getRawHash(int groupId)
     {
-        return BigintType.hash(valuesByGroupId.get(groupId));
+        return BigintType.hash(valuesByGroupId[groupId]);
     }
 
     @VisibleForTesting
@@ -213,16 +211,16 @@ public class BigintGroupByHash
         }
 
         long value = BIGINT.getLong(block, position);
-        long hashPosition = getHashPosition(value, mask);
+        int hashPosition = getHashPosition(value, mask);
 
         // look for an empty slot or a slot containing this key
         while (true) {
-            int groupId = groupIds.get(hashPosition);
+            int groupId = groupIds[hashPosition];
             if (groupId == -1) {
                 break;
             }
 
-            if (value == values.get(hashPosition)) {
+            if (value == values[hashPosition]) {
                 return groupId;
             }
 
@@ -234,14 +232,14 @@ public class BigintGroupByHash
         return addNewGroup(hashPosition, value);
     }
 
-    private int addNewGroup(long hashPosition, long value)
+    private int addNewGroup(int hashPosition, long value)
     {
         // record group id in hash
         int groupId = nextGroupId++;
 
-        values.set(hashPosition, value);
-        valuesByGroupId.set(groupId, value);
-        groupIds.set(hashPosition, groupId);
+        values[hashPosition] = value;
+        valuesByGroupId[groupId] = value;
+        groupIds[hashPosition] = groupId;
 
         // increase capacity, if necessary
         if (needMoreCapacity()) {
@@ -271,27 +269,26 @@ public class BigintGroupByHash
         expectedHashCollisions += estimateNumberOfHashCollisions(getGroupCount(), hashCapacity);
 
         int newMask = newCapacity - 1;
-        LongBigArray newValues = new LongBigArray();
-        newValues.ensureCapacity(newCapacity);
-        IntBigArray newGroupIds = new IntBigArray(-1);
-        newGroupIds.ensureCapacity(newCapacity);
+        long[] newValues = new long[newCapacity];
+        int[] newGroupIds = new int[newCapacity];
+        Arrays.fill(newGroupIds, -1);
 
         for (int groupId = 0; groupId < nextGroupId; groupId++) {
             if (groupId == nullGroupId) {
                 continue;
             }
-            long value = valuesByGroupId.get(groupId);
+            long value = valuesByGroupId[groupId];
 
             // find an empty slot for the address
-            long hashPosition = getHashPosition(value, newMask);
-            while (newGroupIds.get(hashPosition) != -1) {
+            int hashPosition = getHashPosition(value, newMask);
+            while (newGroupIds[hashPosition] != -1) {
                 hashPosition = (hashPosition + 1) & newMask;
                 hashCollisions++;
             }
 
             // record the mapping
-            newValues.set(hashPosition, value);
-            newGroupIds.set(hashPosition, groupId);
+            newValues[hashPosition] = value;
+            newGroupIds[hashPosition] = groupId;
         }
 
         mask = newMask;
@@ -300,13 +297,13 @@ public class BigintGroupByHash
         values = newValues;
         groupIds = newGroupIds;
 
-        this.valuesByGroupId.ensureCapacity(maxFill);
+        this.valuesByGroupId = Arrays.copyOf(valuesByGroupId, maxFill);
         return true;
     }
 
-    private static long getHashPosition(long rawHash, int mask)
+    private static int getHashPosition(long rawHash, int mask)
     {
-        return murmurHash3(rawHash) & mask;
+        return (int) murmurHash3(rawHash) & mask;
     }
 
     @Override
@@ -316,10 +313,10 @@ public class BigintGroupByHash
         myState.hashCapacity = hashCapacity;
         myState.maxFill = maxFill;
         myState.mask = mask;
-        myState.values = values.capture(serdeProvider);
-        myState.groupIds = groupIds.capture(serdeProvider);
+        myState.values = Arrays.copyOf(values, values.length);
+        myState.groupIds = Arrays.copyOf(groupIds, groupIds.length);
         myState.nullGroupId = nullGroupId;
-        myState.valuesByGroupId = valuesByGroupId.capture(serdeProvider);
+        myState.valuesByGroupId = Arrays.copyOf(valuesByGroupId, valuesByGroupId.length);
         myState.nextGroupId = nextGroupId;
         myState.hashCollisions = hashCollisions;
         myState.expectedHashCollisions = expectedHashCollisions;
@@ -335,10 +332,10 @@ public class BigintGroupByHash
         this.hashCapacity = myState.hashCapacity;
         this.maxFill = myState.maxFill;
         this.mask = myState.mask;
-        this.values.restore(myState.values, serdeProvider);
-        this.groupIds.restore(myState.groupIds, serdeProvider);
+        this.values = Arrays.copyOf(myState.values, myState.values.length);
+        this.groupIds = Arrays.copyOf(myState.groupIds, myState.groupIds.length);
         this.nullGroupId = myState.nullGroupId;
-        this.valuesByGroupId.restore(myState.valuesByGroupId, serdeProvider);
+        this.valuesByGroupId = Arrays.copyOf(myState.valuesByGroupId, myState.valuesByGroupId.length);
         this.nextGroupId = myState.nextGroupId;
         this.hashCollisions = myState.hashCollisions;
         this.expectedHashCollisions = myState.expectedHashCollisions;
@@ -352,10 +349,10 @@ public class BigintGroupByHash
         private int hashCapacity;
         private int maxFill;
         private int mask;
-        private Object values;
-        private Object groupIds;
+        private long[] values;
+        private int[] groupIds;
         private int nullGroupId;
-        private Object valuesByGroupId;
+        private long[] valuesByGroupId;
         private int nextGroupId;
         private long hashCollisions;
         private double expectedHashCollisions;

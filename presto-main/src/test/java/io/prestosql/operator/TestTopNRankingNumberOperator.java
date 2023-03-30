@@ -29,6 +29,7 @@ import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -308,13 +309,21 @@ public class TestTopNRankingNumberOperator
         Map<String, Object> operatorSnapshotMapping = new HashMap<>();
 
         operatorSnapshotMapping.put("operatorContext", 0);
-        operatorSnapshotMapping.put("localUserMemoryContext", 51816L);
+        operatorSnapshotMapping.put("localUserMemoryContext", 19192L);
 
         //TopNRankingNumberOperator.groupByHash
         Map<String, Object> groupByHashMapping = new HashMap<>();
-        Map<String, Object> values = new HashMap<>();
-        Map<String, Object> groupIds = new HashMap<>();
-        Map<String, Object> valuesByGroupId = new HashMap<>();
+        List<Long> values = Arrays.asList(0L, 0L, 0L, 0L, 0L, 0L, 0L, 2L, 0L, 0L, 0L, 0L, 1L, 0L, 3L, 0L);
+        List<Integer> groupIds = Arrays.asList(-1, -1, -1, -1, -1, -1, -1, 1, -1, -1, -1, -1, 0, -1, 2, -1);
+        List<Long> valuesByGroupId = new ArrayList<>(6);
+
+        valuesByGroupId.add(1L);
+        valuesByGroupId.add(2L);
+        valuesByGroupId.add(3L);
+        for (int i = 0; i < 9; i++) {
+            valuesByGroupId.add(0L);
+        }
+
         operatorSnapshotMapping.put("groupByHash", groupByHashMapping);
         groupByHashMapping.put("hashCapacity", 16);
         groupByHashMapping.put("maxFill", 12);
@@ -328,15 +337,6 @@ public class TestTopNRankingNumberOperator
         groupByHashMapping.put("expectedHashCollisions", 0.0);
         groupByHashMapping.put("preallocatedMemoryInBytes", 0L);
         groupByHashMapping.put("currentPageSizeInBytes", 356L);
-        values.put("array", long[][].class);
-        values.put("capacity", 1024);
-        values.put("segments", 1);
-        groupIds.put("array", int[][].class);
-        groupIds.put("capacity", 1024);
-        groupIds.put("segments", 1);
-        valuesByGroupId.put("array", long[][].class);
-        valuesByGroupId.put("capacity", 1024);
-        valuesByGroupId.put("segments", 1);
 
         //TopNRankingNumberOperator.groupedTopNBuilder
         Map<String, Object> groupedTopNBuilderMapping = new HashMap<>();
@@ -368,13 +368,21 @@ public class TestTopNRankingNumberOperator
         Map<String, Object> operatorSnapshotMapping = new HashMap<>();
 
         operatorSnapshotMapping.put("operatorContext", 0);
-        operatorSnapshotMapping.put("localUserMemoryContext", 51812L);
+        operatorSnapshotMapping.put("localUserMemoryContext", 19188L);
 
         //TopNRankingNumberOperator.groupByHash
         Map<String, Object> groupByHashMapping = new HashMap<>();
-        Map<String, Object> values = new HashMap<>();
-        Map<String, Object> groupIds = new HashMap<>();
-        Map<String, Object> valuesByGroupId = new HashMap<>();
+        List<Long> values = Arrays.asList(0L, 0L, 0L, 0L, 0L, 0L, 0L, 2L, 0L, 0L, 0L, 0L, 1L, 0L, 3L, 0L);
+        List<Integer> groupIds = Arrays.asList(-1, -1, -1, -1, -1, -1, -1, 1, -1, -1, -1, -1, 0, -1, 2, -1);
+        List<Long> valuesByGroupId = new ArrayList<>(6);
+
+        valuesByGroupId.add(1L);
+        valuesByGroupId.add(2L);
+        valuesByGroupId.add(3L);
+        for (int i = 0; i < 9; i++) {
+            valuesByGroupId.add(0L);
+        }
+
         operatorSnapshotMapping.put("groupByHash", groupByHashMapping);
         groupByHashMapping.put("hashCapacity", 16);
         groupByHashMapping.put("maxFill", 12);
@@ -388,15 +396,6 @@ public class TestTopNRankingNumberOperator
         groupByHashMapping.put("expectedHashCollisions", 0.0);
         groupByHashMapping.put("preallocatedMemoryInBytes", 0L);
         groupByHashMapping.put("currentPageSizeInBytes", 356L);
-        values.put("array", long[][].class);
-        values.put("capacity", 1024);
-        values.put("segments", 1);
-        groupIds.put("array", int[][].class);
-        groupIds.put("capacity", 1024);
-        groupIds.put("segments", 1);
-        valuesByGroupId.put("array", long[][].class);
-        valuesByGroupId.put("capacity", 1024);
-        valuesByGroupId.put("segments", 1);
 
         //TopNRankingNumberOperator.groupedTopNBuilder
         Map<String, Object> groupedTopNBuilderMapping = new HashMap<>();

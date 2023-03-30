@@ -153,6 +153,9 @@ public class TestGroupByHash
         expectedMapping.put("expectedHashCollisions", 858.42432);
         expectedMapping.put("preallocatedMemoryInBytes", 0L);
         expectedMapping.put("currentPageSizeInBytes", 1072L);
+        expectedMapping.put("valuesByGroupId", long[].class);
+        expectedMapping.put("values", long[].class);
+        expectedMapping.put("groupIds", int[].class);
         return expectedMapping;
     }
 
@@ -324,7 +327,6 @@ public class TestGroupByHash
         expectedMapping.put("hashCapacity", 256);
         expectedMapping.put("maxFill", 192);
         expectedMapping.put("mask", 255);
-        expectedMapping.put("groupAddressByHash", long[].class);
         expectedMapping.put("groupIdsByHash", int[].class);
         expectedMapping.put("rawHashByHashPosition", byte[].class);
         expectedMapping.put("nextGroupId", 100);
